@@ -15,7 +15,7 @@ import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Effect.Uncurried as EFn
 import Halogen.Aff.Driver (HalogenIO)
-import Halogen.Aff.Driver as AD
+import Halogen.Aff.Driver as HAffDriver
 import Halogen.Aff.Driver.State (RenderStateX, unRenderStateX)
 import Halogen.Component (Component, ComponentSlot(..), ComponentSlotBox)
 import Halogen.HTML.Core (HTML(..), Prop)
@@ -134,12 +134,12 @@ runUI
   -> Aff (HalogenIO query output Aff)
 runUI component i element = do
   document <- liftEffect $ HTMLDocument.toDocument <$> (DOM.document =<< DOM.window)
-  AD.runUI (renderSpec document element) component i
+  HAffDriver.runUI (renderSpec document element) component i
 
 renderSpec
   :: DOM.Document
   -> DOM.HTMLElement
-  -> AD.RenderSpec HTML RenderState
+  -> HAffDriver.RenderSpec HTML RenderState
 renderSpec document container =
     { render
     , renderChild: identity
@@ -179,6 +179,7 @@ removeChild (RenderState { node }) = do
   npn <- DOM.parentNode node
   traverse_ (\pn -> DOM.removeChild node pn) npn
 
+-- newNode nextSib parent
 substInParent :: DOM.Node -> Maybe DOM.Node -> Maybe DOM.Node -> Effect Unit
 substInParent newNode (Just sib) (Just pn) = void $ DOM.insertBefore newNode sib pn
 substInParent newNode Nothing (Just pn) = void $ DOM.appendChild newNode pn

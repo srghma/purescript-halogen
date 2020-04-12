@@ -21,91 +21,111 @@ import Halogen.Data.OrdBox (OrdBox, mkOrdBox, unOrdBox)
 import Prim.Row as Row
 import Unsafe.Coerce (unsafeCoerce)
 
-foreign import data Any :: Type
+foreign import data AnySlot :: Type
+foreign import data AnySlotIndex :: Type
 
-data Slot (query :: Type -> Type) output slot
+-- query :: ChildQueryItCanAcceptFromParent restOfParentComputationsChildShouldExecute
+-- output :: ChildMessageToParent
+data Slot (query :: Type -> Type) output slotIndex
 
-newtype SlotStorage (slots :: # Type) (slot :: (Type -> Type) -> Type -> Type) =
-  SlotStorage (Map (Tuple String (OrdBox Any)) Any)
+-- slots - record rows, e.g. ( output :: Slot query output slotIndex )
+newtype SlotStorage
+  -- phantom type, keys are Symbols, values are slot
+  (slots :: # Type)
+  -- Map value, this is what is stored in AnySlot
+  (slot :: (Type -> Type) -- query
+        -> Type -- output/message
+        -> Type
+  ) =
+  SlotStorage
+  (Map
+    (Tuple
+      String -- slot symbol
+      (OrdBox AnySlotIndex) -- slotIndexEqFunction x slotIndexCompareFunction x slotIndex
+    )
+    AnySlot -- slot query output , partially applied????
+  )
 
 empty :: forall slots slot. SlotStorage slots slot
 empty = SlotStorage Map.empty
 
+-- lookup slot by symbol, index (if component is )
 lookup
-  :: forall sym px slots slot query output s
-   . Row.Cons sym (Slot query output s) px slots
+  :: forall sym otherSlots slots slot query output slotIndex
+   . Row.Cons sym (Slot query output slotIndex) otherSlots slots
   => IsSymbol sym
-  => Ord s
+  => Ord slotIndex
   => SProxy sym
-  -> s
+  -> slotIndex
   -> SlotStorage slots slot
   -> Maybe (slot query output)
-lookup sym key (SlotStorage m) =
-  coerceSlot (Map.lookup (Tuple (reflectSymbol sym) (coerceBox (mkOrdBox key))) m)
+lookup sym slotIndex (SlotStorage m) =
+  coerceSlot (Map.lookup (Tuple (reflectSymbol sym) (coerceBox (mkOrdBox slotIndex))) m)
   where
-  coerceSlot :: Maybe Any -> Maybe (slot query output)
+  coerceSlot :: Maybe AnySlot -> Maybe (slot query output)
   coerceSlot = unsafeCoerce
 
-  coerceBox :: OrdBox s -> OrdBox Any
+  coerceBox :: OrdBox slotIndex -> OrdBox AnySlotIndex
   coerceBox = unsafeCoerce
 
 pop
-  :: forall sym px slots slot query output s
-   . Row.Cons sym (Slot query output s) px slots
+  :: forall sym otherSlots slots slot query output slotIndex
+   . Row.Cons sym (Slot query output slotIndex) otherSlots slots
   => IsSymbol sym
-  => Ord s
+  => Ord slotIndex
   => SProxy sym
-  -> s
+  -> slotIndex
   -> SlotStorage slots slot
   -> Maybe (Tuple (slot query output) (SlotStorage slots slot))
-pop sym key (SlotStorage m) =
-  coercePop (Map.pop (Tuple (reflectSymbol sym) (coerceBox (mkOrdBox key))) m)
+pop sym slotIndex (SlotStorage m) =
+  coercePop (Map.pop (Tuple (reflectSymbol sym) (coerceBox (mkOrdBox slotIndex))) m)
   where
-  coercePop :: Maybe (Tuple Any (Map (Tuple String (OrdBox Any)) Any)) -> Maybe (Tuple (slot query output) (SlotStorage slots slot))
+  coercePop :: Maybe (Tuple AnySlot (Map (Tuple String (OrdBox AnySlotIndex)) AnySlot)) -> Maybe (Tuple (slot query output) (SlotStorage slots slot))
   coercePop = unsafeCoerce
 
-  coerceBox :: OrdBox s -> OrdBox Any
+  coerceBox :: OrdBox slotIndex -> OrdBox AnySlotIndex
   coerceBox = unsafeCoerce
 
 insert
-  :: forall sym px slots slot query output s
-   . Row.Cons sym (Slot query output s) px slots
+  :: forall sym otherSlots slots slot query output slotIndex
+   . Row.Cons sym (Slot query output slotIndex) otherSlots slots
   => IsSymbol sym
-  => Ord s
+  => Ord slotIndex
   => SProxy sym
-  -> s
+  -> slotIndex
   -> slot query output
   -> SlotStorage slots slot
   -> SlotStorage slots slot
-insert sym key val (SlotStorage m) =
-  SlotStorage (Map.insert (Tuple (reflectSymbol sym) (coerceBox (mkOrdBox key))) (coerceVal val) m)
+insert sym slotIndex val (SlotStorage m) =
+  SlotStorage (Map.insert (Tuple (reflectSymbol sym) (coerceBox (mkOrdBox slotIndex))) (coerceVal val) m)
   where
-  coerceBox :: OrdBox s -> OrdBox Any
+  coerceBox :: OrdBox slotIndex -> OrdBox AnySlotIndex
   coerceBox = unsafeCoerce
 
-  coerceVal :: slot query output -> Any
+  coerceVal :: slot query output -> AnySlot
   coerceVal = unsafeCoerce
 
+-- get all slots for the symbol
 slots
-  :: forall sym px slots slot query output s
-   . Row.Cons sym (Slot query output s) px slots
+  :: forall sym otherSlots slots slot query output slotIndex
+   . Row.Cons sym (Slot query output slotIndex) otherSlots slots
   => IsSymbol sym
-  => Ord s
+  => Ord slotIndex
   => SProxy sym
   -> SlotStorage slots slot
-  -> Map s (slot query output)
+  -> Map slotIndex (slot query output)
 slots sym (SlotStorage m) = Map.foldSubmap Nothing Nothing go m
   where
-  key = reflectSymbol sym
+  slotIndex = reflectSymbol sym
 
-  go (Tuple key' ob) val
-    | key == key' = Map.singleton (unOrdBox (coerceBox ob)) (coerceVal val)
+  go (Tuple slotIndex' ob) val
+    | slotIndex == slotIndex' = Map.singleton (unOrdBox (coerceBox ob)) (coerceVal val)
     | otherwise = mempty
 
-  coerceBox :: OrdBox Any -> OrdBox s
+  coerceBox :: OrdBox AnySlotIndex -> OrdBox slotIndex
   coerceBox = unsafeCoerce
 
-  coerceVal :: Any -> slot query output
+  coerceVal :: AnySlot -> slot query output
   coerceVal = unsafeCoerce
 
 foreachSlot
@@ -116,5 +136,5 @@ foreachSlot
   -> m Unit
 foreachSlot (SlotStorage m) k = traverse_ (k <<< coerceVal) m
   where
-  coerceVal :: forall query output. Any -> slot query output
+  coerceVal :: forall query output. AnySlot -> slot query output
   coerceVal = unsafeCoerce

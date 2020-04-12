@@ -11,7 +11,7 @@ import Prelude
 data OrdBox a = OrdBox (a -> a -> Boolean) (a -> a -> Ordering) a
 
 instance eqOrdBox :: Eq (OrdBox a) where
-  eq (OrdBox e _ x) (OrdBox _ _ y) = e x y
+  eq (OrdBox e _ x) (OrdBox _ _ y) = e x y -- compare function of first object is used, but they should be the same if OrdBox is created with mkOrdBox
 
 instance ordOrdBox :: Ord (OrdBox a) where
   compare (OrdBox _ c x) (OrdBox _ _ y) = c x y

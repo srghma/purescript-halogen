@@ -90,7 +90,13 @@ import Web.UIEvent.WheelEvent.EventTypes as WET
 import Effect.Unsafe (unsafePerformEffect)
 
 handler :: forall r i. EventType -> (Event -> Maybe i) -> IProp r i
-handler et = (unsafeCoerce :: (EventType -> (Event -> Maybe i) -> Prop i) -> EventType -> (Event -> Maybe (Input i)) -> IProp r i) Core.handler et <<< map (map Action)
+handler et h = ((
+  unsafeCoerce
+    :: (EventType -> (Event -> Maybe i) -> Prop i)
+    -> EventType
+    -> (Event -> Maybe (Input i))
+    -> IProp r i
+) Core.handler) et (\event -> map Action (h event))
 
 onAbort :: forall r i. (Event -> Maybe i) -> IProp (onAbort :: Event | r) i
 onAbort = handler (EventType "abort")

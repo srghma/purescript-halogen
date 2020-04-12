@@ -13,7 +13,7 @@ derive newtype instance eqRefLabel :: Eq RefLabel
 derive newtype instance ordRefLabel :: Ord RefLabel
 
 data Input action
-  = RefUpdate RefLabel (Maybe Element)
+  = RefUpdate RefLabel (Maybe Element) -- ?????
   | Action action
 
 derive instance functorInput :: Functor Input

@@ -4,7 +4,7 @@ import Prelude
 
 import Effect.Aff (Aff)
 import Halogen as H
-import Halogen.Aff.Driver as AD
+import Halogen.Aff.Driver as Aff.Driver
 
 newtype TestRenderProduct p i = TestRenderProduct Unit
 
@@ -18,7 +18,7 @@ runUI
    . H.Component TestRenderProduct f i o Aff
   -> i
   -> Aff (H.HalogenIO f o Aff)
-runUI = AD.runUI
+runUI = Aff.Driver.runUI
   { render: \_ _ _ _ -> pure (TestRenderState unit)
   , renderChild: identity
   , removeChild: const (pure unit)

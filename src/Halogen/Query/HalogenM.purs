@@ -111,12 +111,12 @@ raise o = HalogenM $ liftF $ Raise o unit
 
 -- | Sends a query to a child of a component at the specified slot.
 query
-  :: forall state action output m label slots query output' slot a _1
-   . Row.Cons label (Slot query output' slot) _1 slots
+  :: forall state action output m label slots query output' slotIndex a _1
+   . Row.Cons label (Slot query output' slotIndex) _1 slots
   => IsSymbol label
-  => Ord slot
+  => Ord slotIndex
   => SProxy label
-  -> slot
+  -> slotIndex
   -> query a
   -> HalogenM state action slots output m (Maybe a)
 query label p q = HalogenM $ liftF $ ChildQuery $ CQ.mkChildQueryBox $
@@ -124,13 +124,13 @@ query label p q = HalogenM $ liftF $ ChildQuery $ CQ.mkChildQueryBox $
 
 -- | Sends a query to all children of a component at a given slot label.
 queryAll
-  :: forall state action output m label slots query output' slot a _1
-   . Row.Cons label (Slot query output' slot) _1 slots
+  :: forall state action output m label slots query output' slotIndex a _1
+   . Row.Cons label (Slot query output' slotIndex) _1 slots
   => IsSymbol label
-  => Ord slot
+  => Ord slotIndex
   => SProxy label
   -> query a
-  -> HalogenM state action slots output m (Map slot a)
+  -> HalogenM state action slots output m (Map slotIndex a)
 queryAll label q =
   HalogenM $ liftF $ ChildQuery $ CQ.mkChildQueryBox $
     CQ.ChildQuery (\k -> map catMapMaybes <<< traverse k <<< Slot.slots label) q identity

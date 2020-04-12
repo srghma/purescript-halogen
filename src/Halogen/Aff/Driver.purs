@@ -238,13 +238,13 @@ runUI renderSpec component i = do
           Ref.write childrenIn' childrenInRef
           dsx <- Ref.read existing
           unDriverStateX (\st -> do
-            flip Ref.write st.handlerRef $ maybe (pure unit) handler <<< slot.output
+            flip Ref.write st.handlerRef $ maybe (pure unit) handler <<< slot.outputQuery
             handleAff $ Eval.evalM render st.selfRef (st.component.eval slot.input)) dsx
           pure existing
         Nothing ->
           case slot.input of
             HQ.Receive si _ ->
-              runComponent lchs (maybe (pure unit) handler <<< slot.output) si slot.component
+              runComponent lchs (maybe (pure unit) handler <<< slot.outputQuery) si slot.component
             _ ->
               throw "Halogen internal error: slot input was not a Receive query"
       isDuplicate <- isJust <<< slot.get <$> Ref.read childrenOutRef

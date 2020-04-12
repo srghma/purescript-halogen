@@ -105,7 +105,12 @@ prop
   => PropName value
   -> value
   -> IProp r i
-prop = (unsafeCoerce :: (PropName value -> value -> Prop (Input i)) -> PropName value -> value -> IProp r i) Core.prop
+prop = (
+  unsafeCoerce :: (PropName value -> value -> Prop (Input i))
+               -> PropName value
+               -> value
+               -> IProp r i
+  ) Core.prop
 
 -- | Creates an indexed HTML attribute.
 attr :: forall r i. AttrName -> String -> IProp r i
@@ -131,7 +136,14 @@ attrNS =
 -- | been created or destroyed in the DOM for the element that the property is
 -- | attached to.
 ref :: forall r i. RefLabel -> IProp r i
-ref = (unsafeCoerce :: ((Maybe Element -> Maybe (Input i)) -> Prop (Input i)) -> (Maybe Element -> Maybe (Input i)) -> IProp r i) Core.ref <<< go
+ref = (
+  unsafeCoerce
+    :: ((Maybe Element -> Maybe (Input i))
+       -> Prop (Input i)
+       )
+    -> (Maybe Element -> Maybe (Input i))
+    -> IProp r i
+  ) Core.ref <<< go
   where
   go :: RefLabel -> Maybe Element -> Maybe (Input i)
   go p mel = Just (RefUpdate p mel)

@@ -52,6 +52,8 @@ type Tell f = Unit -> f Unit
 -- |
 -- | sendTick :: forall o. H.HalogenIO Query o Aff -> Aff (Maybe Unit)
 -- | sendTick app = app.query (H.tell Tick)
+-- | -- same as
+-- | sendTick app = app.query (Tick Unit)
 -- | ```
 tell :: forall f. Tell f -> f Unit
 tell act = act unit
@@ -77,6 +79,8 @@ type Request f a = (a -> a) -> f a
 -- |
 -- | getTickCount :: forall o. H.HalogenIO Query o Aff -> Aff (Maybe Int)
 -- | getTickCount app = app.query (H.request GetTickCount)
+-- | -- same as
+-- | getTickCount app = app.query (H.request identity)
 -- | ```
 request :: forall f a. Request f a -> f a
 request req = req identity

@@ -18,12 +18,10 @@ module Halogen.Component
 
 import Prelude
 
-import Data.Bifunctor (class Bifunctor, lmap)
-import Data.Bifunctor.Wrap (Wrap(..))
+import Data.Bifunctor (class Bifunctor, lmap, bimap)
 import Data.Coyoneda (unCoyoneda)
 import Data.Foldable (traverse_)
 import Data.Maybe (Maybe(..), maybe)
-import Data.Newtype (under)
 import Data.Symbol (class IsSymbol, SProxy)
 import Data.Tuple (Tuple)
 import Halogen.Data.Slot (Slot, SlotStorage)
@@ -190,7 +188,7 @@ data ComponentSlotBox
 
 instance functorComponentSlotBox :: Functor (ComponentSlotBox surface slots m) where
   map f = unComponentSlot \slot ->
-    mkComponentSlot $ slot { output = map f <$> slot.output }
+    mkComponentSlot $ slot { outputQuery = map f <$> slot.outputQuery }
 
 data ComponentSlot surface slots m action
   = ComponentSlot (ComponentSlotBox surface slots m action)
@@ -199,9 +197,9 @@ data ComponentSlot surface slots m action
 instance functorComponentSlot :: Bifunctor surface => Functor (ComponentSlot surface slots m) where
   map f = case _ of
     ComponentSlot box -> ComponentSlot (map f box)
-    ThunkSlot thunk -> ThunkSlot (Thunk.mapThunk (under Wrap (map f) <<< lmap (map f)) thunk)
+    ThunkSlot thunk -> ThunkSlot (Thunk.mapThunk (bimap (map f) f) thunk)
 
--- | Constructs a [`ComponentSlot`](#t:ComponentSlot).
+-- | Constructs a [`ComponentSlotBox`](#t:ComponentSlotBox).
 -- |
 -- | Takes:
 -- | - the slot address label
@@ -210,24 +208,24 @@ instance functorComponentSlot :: Bifunctor surface => Functor (ComponentSlot sur
 -- | - the input value to pass to the component
 -- | - a function mapping outputs from the component to a query in the parent
 componentSlot
-  :: forall surface query input output slots m action label slot _1
-   . Row.Cons label (Slot query output slot) _1 slots
+  :: forall surface query input output slots m action label slotIndex _1
+   . Row.Cons label (Slot query output slotIndex) _1 slots
   => IsSymbol label
-  => Ord slot
+  => Ord slotIndex
   => SProxy label
-  -> slot
+  -> slotIndex
   -> Component surface query input output m
   -> input
   -> (output -> Maybe action)
   -> ComponentSlotBox surface slots m action
-componentSlot label p comp input output =
+componentSlot label slotIndex component input outputQuery =
   mkComponentSlot
-    { get: Slot.lookup label p
-    , pop: Slot.pop label p
-    , set: Slot.insert label p
-    , component: comp
+    { get: Slot.lookup label slotIndex
+    , pop: Slot.pop label slotIndex
+    , set: Slot.insert label slotIndex
+    , component
     , input: Receive input unit
-    , output
+    , outputQuery
     }
 
 -- | The internal representation used for a [`ComponentSlot`](#t:ComponentSlot).
@@ -237,7 +235,7 @@ type ComponentSlotSpec surface query input output slots m action =
   , set :: forall slot. slot query output -> SlotStorage slots slot -> SlotStorage slots slot
   , component :: Component surface query input output m
   , input :: forall a. HalogenQ query a input Unit
-  , output :: output -> Maybe action
+  , outputQuery :: output -> Maybe action
   }
 
 -- | Constructs [`ComponentSlotBox`](#t:ComponentSlot) from a [`ComponentSlotSpec`](#t:ComponentSlotSpec).
@@ -274,3 +272,4 @@ hoistSlot nat = case _ of
       ComponentSlot $ mkComponentSlot $ slot { component = hoist nat slot.component }
   ThunkSlot t ->
     ThunkSlot $ Thunk.hoist (lmap (hoistSlot nat)) t
+

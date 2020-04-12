@@ -52,12 +52,12 @@ fromPlainHTML = unsafeCoerce -- ≅ bimap absurd absurd
 -- | - the input value to pass to the component
 -- | - a function mapping outputs from the component to a query in the parent
 slot
-  :: forall query action input output slots m label slot _1
-   . Row.Cons label (Slot query output slot) _1 slots
+  :: forall query action input output slots m label slotIndex _1
+   . Row.Cons label (Slot query output slotIndex) _1 slots
   => IsSymbol label
-  => Ord slot
+  => Ord slotIndex
   => SProxy label
-  -> slot
+  -> slotIndex
   -> Component HTML query input output m
   -> input
   -> (output -> Maybe action)
@@ -85,8 +85,9 @@ memoized
   -> ComponentHTML action slots m
 memoized eqFn f a = Core.widget (ThunkSlot (thunked eqFn f a))
 
--- | Skips rendering for referentially equal arguments. You should not use this
--- | function fully saturated, but instead partially apply it for use within a
+-- | Skips rendering for referentially equal arguments (like `String` or `Integer`, but not `Array Tmth`).
+-- |
+-- | You should not use this function fully saturated, but instead partially apply it for use within a
 -- | Component's scope.
 lazy
   :: forall a action slots m

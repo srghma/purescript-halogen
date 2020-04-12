@@ -109,7 +109,7 @@ When we want to render a child component in the HTML DSL we use the [`slot`][Hal
 ``` purescript
 slot
   :: forall query action input output slots m label slot _1
-     . Row.Cons label (Slot query output slot) _1 slots
+     . Row.Cons label (Slot query output slotIndex) _1 slots
   => IsSymbol label
   => Ord slot
   => SProxy label
@@ -358,7 +358,7 @@ As well as being able to query children one at a time, we can send a query to al
 ``` purescript
 queryAll
   :: forall state action output m label slots query output' slot a _1
-   . Row.Cons label (Slot query output' slot) _1 slots
+   . Row.Cons label (Slot query output' slotIndex) _1 slots
   => IsSymbol label
   => Ord slot
   => SProxy label

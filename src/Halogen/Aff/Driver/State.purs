@@ -39,6 +39,7 @@ type LifecycleHandlers =
 
 newtype DriverState h r s f act ps i o = DriverState (DriverStateRec h r s f act ps i o)
 
+-- global driver state? per component?
 type DriverStateRec h r s f act ps i o =
   { component :: ComponentSpec h s f act ps i o Aff
   , state :: s
@@ -51,7 +52,7 @@ type DriverStateRec h r s f act ps i o =
   , pendingQueries :: Ref (Maybe (List (Aff Unit)))
   , pendingOuts :: Ref (Maybe (List (Aff Unit)))
   , pendingHandlers :: Ref (Maybe (List (Aff Unit)))
-  , rendering :: Maybe (r s act ps o)
+  , rendering :: Maybe (r s act ps o) -- RenderStateX ???
   , fresh :: Ref Int
   , subscriptions :: Ref (Maybe (M.Map SubscriptionId (Finalizer Aff)))
   , forks :: Ref (M.Map ForkId (Fiber Unit))
