@@ -39,16 +39,16 @@ import Unsafe.Reference (unsafeRefEq)
 
 -- used only within this file
 type Renderer h r
-  = forall s f act ps i o
+  = forall state query act ps i o
    . Ref LifecycleHandlers -- TODO: global or per component
-  -> Ref (DriverState h r s f act ps i o) -- Driver of a CURRENT compoenent
+  -> Ref (DriverState h r state query act ps i o) -- Driver of a CURRENT compoenent
   -> Effect Unit
 
 -- uses evalM
 evalInput -- evalInput??? or maybe maker of `inputHandler :: Input act -> Aff Unit`???
-  :: forall h r s f act ps i o
+  :: forall h r state query act ps i o
    . Renderer h r
-  -> Ref (DriverState h r s f act ps i o)
+  -> Ref (DriverState h r state query act ps i o)
   -> Input act
   -> Aff Unit
 evalInput render ref = case _ of
@@ -62,9 +62,9 @@ evalInput render ref = case _ of
 -- uses evalM
 -- send Query to `eval` function
 evalQ
-  :: forall h r s query act ps i o nextComputationFn
+  :: forall h r state query act ps i o nextComputationFn
    . Renderer h r
-  -> Ref (DriverState h r s query act ps i o)
+  -> Ref (DriverState h r state query act ps i o)
   -> query nextComputationFn
   -> Aff (Maybe nextComputationFn)
 evalQ render ref q = do
@@ -81,10 +81,10 @@ evalQ render ref q = do
     )
 
 evalM
-  :: forall h r s f act ps i o
+  :: forall h r state query act ps i o
    . Renderer h r
-  -> Ref (DriverState h r s f act ps i o)
-  -> HalogenM s act ps o Aff
+  -> Ref (DriverState h r state query act ps i o)
+  -> HalogenM state act ps o Aff
   ~> Aff
 evalM render initRef (HalogenM hm) = foldFree (go initRef) hm
   where
@@ -205,9 +205,9 @@ runLifecycleAround lchs f = do
   pure result
 
 fresh
-  :: forall h r s f act ps i o a
+  :: forall h r state query act ps i o a
    . (Int -> a)
-  -> Ref (DriverState h r s f act ps i o)
+  -> Ref (DriverState h r state query act ps i o)
   -> Aff a
 fresh f ref = do
   DriverState st <- liftEffect (Ref.read ref)

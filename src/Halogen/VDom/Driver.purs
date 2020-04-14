@@ -61,14 +61,14 @@ mkSpec
   -> V.VDomSpec
       (Array (VP.Prop (Input action)))
       (ComponentSlot HTML slots Aff action)
-mkSpec handler childRendererRef document =
+mkSpec inputHandler childRendererRef document =
   V.VDomSpec { buildWidget, buildAttributes, document }
   where
 
   buildAttributes
     :: DOM.Element
     -> V.Machine (Array (VP.Prop (Input action))) Unit
-  buildAttributes = VP.buildProp handler
+  buildAttributes = VP.buildProp inputHandler
 
   buildWidget
     :: V.VDomSpec

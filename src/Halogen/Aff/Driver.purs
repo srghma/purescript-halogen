@@ -112,11 +112,11 @@ type RenderSpec h r =
   }
 
 runUI
-  :: forall h r f i o
+  :: forall h r query i o
    . RenderSpec h r
-  -> Component h f i o Aff
+  -> Component h query i o Aff
   -> i
-  -> Aff (HalogenIO f o Aff)
+  -> Aff (HalogenIO query o Aff)
 runUI renderSpec component i = do
   lchs <- liftEffect newLifecycleHandlers
   fresh <- liftEffect $ Ref.new 0
@@ -134,10 +134,10 @@ runUI renderSpec component i = do
   where
 
   evalDriver -- runs evalQ if component is not yet disposed
-    :: forall s f' act ps i' o'
+    :: forall state query' act ps i' o'
      . Ref Boolean
-    -> Ref (DriverState h r s f' act ps i' o')
-    -> forall a. (f' a -> Aff (Maybe a))
+    -> Ref (DriverState h r state query' act ps i' o')
+    -> forall a. (query' a -> Aff (Maybe a))
   evalDriver disposed ref q =
     liftEffect (Ref.read disposed) >>=
       if _
@@ -170,12 +170,12 @@ runUI renderSpec component i = do
       AVar.kill (error "ended") inputVar -- kill in case of something, e.g. is not killed
 
   runComponent
-    :: forall f' i' o'
+    :: forall query' i' o'
      . Ref LifecycleHandlers
     -> (o' -> Aff Unit) -- how to handle output: IF this is root component THEN fill Avar, it will be handled to consumers ELSE if this is child THEN pass to parent
     -> i' -- current component input
-    -> Component h f' i' o' Aff -- this is eq to ComponentSpec
-    -> Effect (Ref (DriverStateX h r f' o'))
+    -> Component h query' i' o' Aff -- this is eq to ComponentSpec
+    -> Effect (Ref (DriverStateX h r query' o'))
   runComponent lchsRef {- parent/global/rootLchsRef ??? -} outputHandler input = unComponent \componentSpec -> do
     lchsRef' <- newLifecycleHandlers -- new
     driverStateXRef <- initDriverState componentSpec input outputHandler lchsRef' -- driver with new
@@ -195,9 +195,9 @@ runUI renderSpec component i = do
     pure driverStateXRef
 
   render
-    :: forall s f' act ps i' o'
+    :: forall state query' act ps i' o'
      . Ref LifecycleHandlers
-    -> Ref (DriverState h r s f' act ps i' o')
+    -> Ref (DriverState h r state query' act ps i' o')
     -> Effect Unit
   render lchsRef var = Ref.read var >>= \(DriverState ds) -> do
     shouldProcessHandlers <- isNothing <$> Ref.read ds.pendingHandlers
@@ -216,7 +216,7 @@ runUI renderSpec component i = do
 
       childInputHandler :: act -> Aff Unit
       childInputHandler = Eval.queueIfOpenOrRunIfClosed pendingQueries <<< inputHandler <<< Input.Action -- messages from child to parent, reuse inputHandler machinery (TODO: we queue )
-    (rendering :: r s act ps o') <-
+    (rendering :: r state act ps o') <-
       renderSpec.render -- this is when VDOM is rendered
         (handleAff <<< inputHandler) -- how to handle input
         (renderChild lchsRef childInputHandler ds.childrenIn ds.childrenOut) -- how to render child
@@ -261,13 +261,13 @@ runUI renderSpec component i = do
         Just (Tuple (DriverStateXRef driverStateXRef) otherChildrenIn) -> do
           Ref.write otherChildrenIn childrenInRef
           dsx <- Ref.read driverStateXRef
-          unDriverStateX (\st -> do
+          unDriverStateX (\driverState -> do
             -- update current handler ref
-            flip Ref.write st.handlerRef $
+            flip Ref.write driverState.handlerRef $
               maybe (pure unit) outputHandler <<< componentSlotSpec.outputToAction
 
             handleAff $
-              Eval.evalM render st.selfRef (st.component.eval componentSlotSpec.input)) dsx
+              Eval.evalM render driverState.selfRef (driverState.component.eval componentSlotSpec.input)) dsx
           pure driverStateXRef
 
         -- child is new
@@ -294,10 +294,10 @@ runUI renderSpec component i = do
         Just r -> pure (renderSpec.renderChild r)))
 
   squashChildInitializers
-    :: forall f' o'
+    :: forall query' o'
      . Ref LifecycleHandlers
     -> L.List (Aff Unit)
-    -> DriverStateX h r f' o'
+    -> DriverStateX h r query' o'
     -> Effect Unit
   squashChildInitializers lchsRef prevInits =
     unDriverStateX \st -> do
@@ -309,15 +309,15 @@ runUI renderSpec component i = do
             parSequence_ (L.reverse lchs.initializers)
             parentInitializer
             liftEffect do
-              handlePending st.pendingQueries
+              handlePending st.pendingQueries -- after initial rendering pendingOuts and pendingQueries will be executed immediately
               handlePending st.pendingOuts) : prevInits
         , finalizers: lchs.finalizers
         }) lchsRef
 
   collectFinalizersWithCleanSubsEffect
-    :: forall f' o'
+    :: forall query' o'
      . Ref LifecycleHandlers
-    -> DriverStateX h r f' o'
+    -> DriverStateX h r query' o'
     -> Effect Unit
   collectFinalizersWithCleanSubsEffect lchsRef = do
     unDriverStateX \st -> do
@@ -331,10 +331,10 @@ runUI renderSpec component i = do
         dsx <- Ref.read ref
         collectFinalizersWithCleanSubsEffect lchsRef dsx
 
-  rootDispose :: forall f' o'
+  rootDispose :: forall query' o'
      . Ref Boolean
     -> Ref LifecycleHandlers
-    -> DriverStateX h r f' o'
+    -> DriverStateX h r query' o'
     -> Ref (M.Map Int (AVar.AVar o'))
     -> Aff Unit
   rootDispose disposed lchsRef dsx listenersRef = Eval.runLifecycleAround lchsRef do -- this is when collected finalizers are beign run
@@ -357,8 +357,8 @@ handlePending ref = do
   for_ queue (handleAff <<< traverse_ fork <<< L.reverse)
 
 cleanupSubscriptionsAndForks
-  :: forall h r s f act ps i o
-   . DriverState h r s f act ps i o
+  :: forall h r state query act ps i o
+   . DriverState h r state query act ps i o
   -> Effect Unit
 cleanupSubscriptionsAndForks (DriverState ds) = do
   traverse_ (handleAff <<< traverse_ (fork <<< Halogen.Query.EventSource.finalize)) =<< Ref.read ds.subscriptions
