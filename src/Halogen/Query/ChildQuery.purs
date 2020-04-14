@@ -6,27 +6,27 @@ import Data.Maybe (Maybe)
 import Halogen.Data.Slot (SlotStorage)
 import Unsafe.Coerce (unsafeCoerce)
 
-data ChildQueryBox (ps :: # Type) a
+data ChildQueryX (slots :: # Type) a
 
-data ChildQuery ps g o a f b =
+data ChildQuery slots query o a map mapvalue =
   ChildQuery
-    (forall slot m. Applicative m => (slot g o -> m (Maybe b)) -> SlotStorage ps slot -> m (f b))
-    (g b)
-    (f b -> a)
+    (forall slot m. Applicative m => (slot query o -> m (Maybe mapvalue)) -> SlotStorage slots slot -> m (map mapvalue)) -- unpack :: evalChild -> slotStorage ->
+    (query mapvalue) -- query :: ChildQueryItCanAcceptFromParent restOfParentComputationsChildShouldExecute
+    (map mapvalue -> a) -- reply
 
-instance functorChildQuery :: Functor (ChildQueryBox ps) where
-  map f = unChildQueryBox \(ChildQuery u q k) ->
-    mkChildQueryBox (ChildQuery u q (f <<< k))
+instance functorChildQuery :: Functor (ChildQueryX slots) where
+  map f = unChildQueryX \(ChildQuery u q k) ->
+    mkChildQueryX (ChildQuery u q (f <<< k))
 
-mkChildQueryBox
-  :: forall ps g o a f b
-   . ChildQuery ps g o a f b
-  -> ChildQueryBox ps a
-mkChildQueryBox = unsafeCoerce
+mkChildQueryX
+  :: forall slots query o a map mapvalue
+   . ChildQuery slots query o a map mapvalue
+  -> ChildQueryX slots a
+mkChildQueryX = unsafeCoerce
 
-unChildQueryBox
-  :: forall ps a r
-   . (forall g o f b. ChildQuery ps g o a f b -> r)
-  -> ChildQueryBox ps a
+unChildQueryX
+  :: forall slots a r
+   . (forall query o map mapvalue. ChildQuery slots query o a map mapvalue -> r)
+  -> ChildQueryX slots a
   -> r
-unChildQueryBox = unsafeCoerce
+unChildQueryX = unsafeCoerce

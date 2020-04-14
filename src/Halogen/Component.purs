@@ -7,12 +7,12 @@ module Halogen.Component
   , EvalSpec
   , mkEval
   , defaultEval
-  , ComponentSlotBox
+  , ComponentSlotSpecX
   , ComponentSlot(..)
-  , componentSlot
+  , componentSlotSpecX
   , ComponentSlotSpec
-  , mkComponentSlot
-  , unComponentSlot
+  , mkComponentSlotSpecX
+  , unComponentSlotSpecX
   , hoistSlot
   ) where
 
@@ -176,22 +176,24 @@ mkEval args = case _ of
     traverse_ args.handleAction (args.receive i) $> a
   Action action a ->
     args.handleAction action $> a
-  Query req f ->
-    unCoyoneda (\g → map (maybe (f unit) g) <<< args.handleQuery) req
+  Query req mkDefaultValue ->
+    -- HOW QUERYING WORKS 4
+    -- TODO: mkDefaultValue is not lazy here
+    unCoyoneda (\itoa queryi → map (maybe (mkDefaultValue unit) itoa) $ args.handleQuery queryi) req
 
 -- | A slot for a child component in a component's rendered content.
-data ComponentSlotBox
+data ComponentSlotSpecX
   (surface :: Type -> Type -> Type)
   (slots :: # Type)
   (m :: Type -> Type)
   (action :: Type)
 
-instance functorComponentSlotBox :: Functor (ComponentSlotBox surface slots m) where
-  map f = unComponentSlot \slot ->
-    mkComponentSlot $ slot { outputQuery = map f <$> slot.outputQuery }
+instance functorComponentSlotSpecX :: Functor (ComponentSlotSpecX surface slots m) where
+  map f = unComponentSlotSpecX \slot ->
+    mkComponentSlotSpecX $ slot { outputToAction = map f <$> slot.outputToAction }
 
 data ComponentSlot surface slots m action
-  = ComponentSlot (ComponentSlotBox surface slots m action)
+  = ComponentSlot (ComponentSlotSpecX surface slots m action)
   | ThunkSlot (Thunk (surface (ComponentSlot surface slots m action)) action)
 
 instance functorComponentSlot :: Bifunctor surface => Functor (ComponentSlot surface slots m) where
@@ -199,7 +201,7 @@ instance functorComponentSlot :: Bifunctor surface => Functor (ComponentSlot sur
     ComponentSlot box -> ComponentSlot (map f box)
     ThunkSlot thunk -> ThunkSlot (Thunk.mapThunk (bimap (map f) f) thunk)
 
--- | Constructs a [`ComponentSlotBox`](#t:ComponentSlotBox).
+-- | Constructs a [`ComponentSlotSpecX`](#t:ComponentSlotSpecX).
 -- |
 -- | Takes:
 -- | - the slot address label
@@ -207,7 +209,7 @@ instance functorComponentSlot :: Bifunctor surface => Functor (ComponentSlot sur
 -- | - the component for the slot
 -- | - the input value to pass to the component
 -- | - a function mapping outputs from the component to a query in the parent
-componentSlot
+componentSlotSpecX
   :: forall surface query input output slots m action label slotIndex _1
    . Row.Cons label (Slot query output slotIndex) _1 slots
   => IsSymbol label
@@ -217,33 +219,33 @@ componentSlot
   -> Component surface query input output m
   -> input
   -> (output -> Maybe action)
-  -> ComponentSlotBox surface slots m action
-componentSlot label slotIndex component input outputQuery =
-  mkComponentSlot
+  -> ComponentSlotSpecX surface slots m action
+componentSlotSpecX label slotIndex component input outputToAction =
+  mkComponentSlotSpecX
     { get: Slot.lookup label slotIndex
     , pop: Slot.pop label slotIndex
     , set: Slot.insert label slotIndex
-    , component
-    , input: Receive input unit
-    , outputQuery
+    , component -- component to render
+    , input: Receive input unit -- passed to Initialize on first render and to Receive on subsiquent
+    , outputToAction -- how to convert messages from child to an action of a current component
     }
 
 -- | The internal representation used for a [`ComponentSlot`](#t:ComponentSlot).
 type ComponentSlotSpec surface query input output slots m action =
-  { get :: forall slot. SlotStorage slots slot -> Maybe (slot query output)
+  { get :: forall slot. SlotStorage slots slot -> Maybe (slot query output) -- how to get anything in the slot (slot = Driver)
   , pop :: forall slot. SlotStorage slots slot -> Maybe (Tuple (slot query output) (SlotStorage slots slot))
   , set :: forall slot. slot query output -> SlotStorage slots slot -> SlotStorage slots slot
-  , component :: Component surface query input output m
+  , component :: Component surface query input output m -- component this slot should render
   , input :: forall a. HalogenQ query a input Unit
-  , outputQuery :: output -> Maybe action
+  , outputToAction :: output -> Maybe action
   }
 
--- | Constructs [`ComponentSlotBox`](#t:ComponentSlot) from a [`ComponentSlotSpec`](#t:ComponentSlotSpec).
-mkComponentSlot
+-- | Constructs [`ComponentSlotSpecX`](#t:ComponentSlot) from a [`ComponentSlotSpec`](#t:ComponentSlotSpec).
+mkComponentSlotSpecX
   :: forall surface query input output slots m action
    . ComponentSlotSpec surface query input output slots m action
-  -> ComponentSlotBox surface slots m action
-mkComponentSlot = unsafeCoerce
+  -> ComponentSlotSpecX surface slots m action
+mkComponentSlotSpecX = unsafeCoerce
 
 -- | Exposes the inner details of a [`ComponentSlot`](#t:ComponentSlot) to a
 -- | function to produce a new result.
@@ -251,12 +253,12 @@ mkComponentSlot = unsafeCoerce
 -- |  The hidden details will not be allowed to be revealed in the result
 -- | of the function - if any of the hidden types (state, action, set of slots)
 -- | appear in the result, the compiler will complain about an escaped skolem.
-unComponentSlot
+unComponentSlotSpecX
   :: forall surface slots m action a
    . (forall query input output. ComponentSlotSpec surface query input output slots m action -> a)
-  -> ComponentSlotBox surface slots m action
+  -> ComponentSlotSpecX surface slots m action
   -> a
-unComponentSlot = unsafeCoerce
+unComponentSlotSpecX = unsafeCoerce
 
 -- | Changes the [`ComponentSlot`](#t:ComponentSlot)'s `m` type.
 hoistSlot
@@ -268,8 +270,8 @@ hoistSlot
   -> ComponentSlot surface slots m' action
 hoistSlot nat = case _ of
   ComponentSlot cs ->
-    cs # unComponentSlot \slot ->
-      ComponentSlot $ mkComponentSlot $ slot { component = hoist nat slot.component }
+    cs # unComponentSlotSpecX \slot ->
+      ComponentSlot $ mkComponentSlotSpecX $ slot { component = hoist nat slot.component }
   ThunkSlot t ->
     ThunkSlot $ Thunk.hoist (lmap (hoistSlot nat)) t
 

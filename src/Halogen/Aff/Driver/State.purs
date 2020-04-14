@@ -2,7 +2,7 @@ module Halogen.Aff.Driver.State
   ( LifecycleHandlers
   , DriverState(..)
   , mapDriverState
-  , DriverStateRef(..)
+  , DriverStateXRef(..)
   , DriverStateRec
   , DriverStateX
   , unDriverStateX
@@ -44,9 +44,9 @@ type DriverStateRec h r s f act ps i o =
   { component :: ComponentSpec h s f act ps i o Aff
   , state :: s
   , refs :: M.Map String Element
-  , children :: SlotStorage ps (DriverStateRef h r)
-  , childrenIn :: Ref (SlotStorage ps (DriverStateRef h r))
-  , childrenOut :: Ref (SlotStorage ps (DriverStateRef h r))
+  , children :: SlotStorage ps (DriverStateXRef h r)
+  , childrenIn :: Ref (SlotStorage ps (DriverStateXRef h r))
+  , childrenOut :: Ref (SlotStorage ps (DriverStateXRef h r))
   , selfRef :: Ref (DriverState h r s f act ps i o)
   , handlerRef :: Ref (o -> Aff Unit)
   , pendingQueries :: Ref (Maybe (List (Aff Unit)))
@@ -66,7 +66,7 @@ mapDriverState
   -> DriverState h r s f act ps i o
 mapDriverState f (DriverState ds) = DriverState (f ds)
 
-newtype DriverStateRef h r f o = DriverStateRef (Ref (DriverStateX h r f o))
+newtype DriverStateXRef h r f o = DriverStateXRef (Ref (DriverStateX h r f o))
 
 -- | A version of `DriverState` with the aspects relating to child components
 -- | existentially hidden.
@@ -134,10 +134,10 @@ initDriverState component input handler lchs = do
   selfRef <- Ref.new (unsafeCoerce {})
   childrenIn <- Ref.new SlotStorage.empty
   childrenOut <- Ref.new SlotStorage.empty
-  handlerRef <- Ref.new handler
+  handlerRef <- Ref.new handler -- output handler
   pendingQueries <- Ref.new (Just Nil)
-  pendingOuts <- Ref.new (Just Nil)
-  pendingHandlers <- Ref.new Nothing
+  pendingOuts <- Ref.new (Just Nil) -- stores messages, TODO: always in open state
+  pendingHandlers <- Ref.new Nothing -- default state is closed
   fresh <- Ref.new 1
   subscriptions <- Ref.new (Just M.empty)
   forks <- Ref.new M.empty
@@ -148,7 +148,7 @@ initDriverState component input handler lchs = do
       , state: component.initialState input
       , refs: M.empty
       , children: SlotStorage.empty
-      , childrenIn
+      , childrenIn -- pop child from childrenIn -> process child -> put to childrenOut
       , childrenOut
       , selfRef
       , handlerRef

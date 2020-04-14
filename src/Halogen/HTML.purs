@@ -19,7 +19,7 @@ import Halogen.HTML.Elements
 import Data.Function.Uncurried as Fn
 import Data.Maybe (Maybe)
 import Data.Symbol (class IsSymbol, SProxy)
-import Halogen.Component (Component, ComponentSlot(..), componentSlot)
+import Halogen.Component (Component, ComponentSlot(..), componentSlotSpecX)
 import Halogen.Data.Slot (Slot)
 import Halogen.HTML.Core (class IsProp, AttrName(..), ClassName(..), HTML(..), Namespace(..), PropName(..), ElemName(..), text, handler)
 import Halogen.HTML.Core as Core
@@ -62,8 +62,8 @@ slot
   -> input
   -> (output -> Maybe action)
   -> ComponentHTML action slots m
-slot label p component input outputQuery =
-  Core.widget (ComponentSlot (componentSlot label p component input outputQuery))
+slot label slotIndex component input outputToAction =
+  Core.widget (ComponentSlot (componentSlotSpecX label slotIndex component input outputToAction))
 
 -- | Optimizes rendering of a subtree given an equality predicate. If an argument
 -- | is deemed equivalent to the previous value, rendering and diffing will be

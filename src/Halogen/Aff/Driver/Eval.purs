@@ -1,10 +1,10 @@
 module Halogen.Aff.Driver.Eval
   ( Renderer
-  , evalF
+  , evalInput
   , evalQ
   , evalM
-  , handleLifecycle
-  , queueOrRun
+  , runLifecycleAround
+  , queueIfOpenOrRunIfClosed
   ) where
 
 import Prelude
@@ -15,19 +15,20 @@ import Control.Monad.Fork.Class (fork)
 import Control.Monad.Free (foldFree)
 import Control.Monad.Trans.Class (lift)
 import Control.Parallel (parSequence_, parallel, sequential)
-import Data.Coyoneda (liftCoyoneda)
+import Data.Coyoneda (Coyoneda, liftCoyoneda)
 import Data.Foldable (traverse_)
 import Data.List (List, (:))
-import Data.List as L
-import Data.Map as M
+import Data.List as Data.List
+import Data.Map as Data.Map
 import Data.Maybe (Maybe(..), maybe)
 import Data.Tuple (Tuple(..))
 import Effect (Effect)
-import Effect.Aff (Aff, error, finally, killFiber)
+import Effect.Aff (Aff, error, finally, killFiber, ParAff)
 import Effect.Class (liftEffect)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
-import Halogen.Aff.Driver.State (DriverState(..), DriverStateRef(..), LifecycleHandlers, mapDriverState, unDriverStateX)
+import Halogen.Aff.Driver.State (DriverState(..), DriverStateXRef(..), LifecycleHandlers, mapDriverState, unDriverStateX)
+import Halogen.Data.Slot as Halogen.Data.Slot
 import Halogen.Query.ChildQuery as CQ
 import Halogen.Query.EventSource as ES
 import Halogen.Query.HalogenM (ForkId(..), HalogenAp(..), HalogenF(..), HalogenM(..), SubscriptionId(..))
@@ -36,35 +37,48 @@ import Halogen.Query.Input (Input)
 import Halogen.Query.Input as Input
 import Unsafe.Reference (unsafeRefEq)
 
+-- used only within this file
 type Renderer h r
   = forall s f act ps i o
-   . Ref LifecycleHandlers
-  -> Ref (DriverState h r s f act ps i o)
+   . Ref LifecycleHandlers -- TODO: global or per component
+  -> Ref (DriverState h r s f act ps i o) -- Driver of a CURRENT compoenent
   -> Effect Unit
 
-evalF
+-- uses evalM
+evalInput -- evalInput??? or maybe maker of `inputHandler :: Input act -> Aff Unit`???
   :: forall h r s f act ps i o
    . Renderer h r
   -> Ref (DriverState h r s f act ps i o)
   -> Input act
   -> Aff Unit
-evalF render ref = case _ of
+evalInput render ref = case _ of
   Input.RefUpdate (Input.RefLabel p) el -> do
     liftEffect $ flip Ref.modify_ ref $ mapDriverState \st ->
-      st { refs = M.alter (const el) p st.refs }
+      st { refs = Data.Map.alter (const el) p st.refs }
   Input.Action act -> do
     DriverState st <- liftEffect (Ref.read ref)
-    evalM render ref (st.component.eval (HQ.Action act unit))
+    evalM render ref (st.component.eval (HQ.Action act unit)) -- unit - eval will return HalogenM that contains unit
 
+-- uses evalM
+-- send Query to `eval` function
 evalQ
-  :: forall h r s f act ps i o a
+  :: forall h r s query act ps i o nextComputationFn
    . Renderer h r
-  -> Ref (DriverState h r s f act ps i o)
-  -> f a
-  -> Aff (Maybe a)
+  -> Ref (DriverState h r s query act ps i o)
+  -> query nextComputationFn
+  -> Aff (Maybe nextComputationFn)
 evalQ render ref q = do
   DriverState st <- liftEffect (Ref.read ref)
-  evalM render ref (st.component.eval (HQ.Query (Just <$> liftCoyoneda q) (const Nothing)))
+  -- HOW QUERYING WORKS 3
+  evalM render ref (
+    st.component.eval
+      (HQ.Query
+        -- what is `i` for Coyoneda? `i` is `a`, because liftCoyoneda is just `coyoneda identity`.
+        -- TODO: there is no reason to use Coyoneda, right? to hide fact that f is functor??? WHAT
+        (Just <$> liftCoyoneda q :: Coyoneda query (Maybe nextComputationFn))
+        (const Nothing) -- default value is nothing
+      )
+    )
 
 evalM
   :: forall h r s f act ps i o
@@ -81,35 +95,35 @@ evalM render initRef (HalogenM hm) = foldFree (go initRef) hm
     ~> Aff
   go ref = case _ of
     State f -> do
-      DriverState (st@{ state, lifecycleHandlers }) <- liftEffect (Ref.read ref)
+      DriverState (st@{ state, lifecycleHandlers }) <- liftEffect (Ref.read ref) -- TODO:: lifecycleHandlers are global or too per component???
       case f state of
         Tuple a state'
-          | unsafeRefEq state state' -> pure a
-          | otherwise -> do
+          | unsafeRefEq state state' -> pure a -- if state was requested (f == indentity), do nothing
+          | otherwise -> do -- if state was changed - update driver, rerender, run lifecycles, return
               liftEffect $ Ref.write (DriverState (st { state = state' })) ref
-              handleLifecycle lifecycleHandlers (render lifecycleHandlers ref)
+              runLifecycleAround lifecycleHandlers (render lifecycleHandlers ref)
               pure a
-    Subscribe fes k -> do
+    Subscribe mkEventSource callback -> do
       sid <- fresh SubscriptionId ref
-      let (ES.EventSource setup) = fes sid
+      let (ES.EventSource setup) = mkEventSource sid
       DriverState ({ subscriptions }) <- liftEffect (Ref.read ref)
       _ ← fork do
         { producer, finalizer } <- setup
         let
           done = ES.Finalizer do
             subs <- liftEffect $ Ref.read subscriptions
-            liftEffect $ Ref.modify_ (map (M.delete sid)) subscriptions
-            when (maybe false (M.member sid) subs) (ES.finalize finalizer)
+            liftEffect $ Ref.modify_ (map (Data.Map.delete sid)) subscriptions
+            when (maybe false (Data.Map.member sid) subs) (ES.finalize finalizer)
           consumer = do
             act <- CR.await
             subs <- lift $ liftEffect (Ref.read subscriptions)
-            when ((M.member sid <$> subs) == Just true) do
-              _ <- lift $ fork $ evalF render ref (Input.Action act)
+            when ((Data.Map.member sid <$> subs) == Just true) do
+              _ <- lift $ fork $ evalInput render ref (Input.Action act)
               consumer
-        liftEffect $ Ref.modify_ (map (M.insert sid done)) subscriptions
+        liftEffect $ Ref.modify_ (map (Data.Map.insert sid done)) subscriptions
         CR.runProcess (consumer `CR.pullFrom` producer)
         ES.finalize done
-      pure (k sid)
+      pure (callback sid)
     Unsubscribe sid next -> do
       unsubscribe sid ref
       pure next
@@ -120,7 +134,7 @@ evalM render initRef (HalogenM hm) = foldFree (go initRef) hm
     Raise o a -> do
       DriverState { handlerRef, pendingOuts } <- liftEffect (Ref.read ref)
       handler <- liftEffect (Ref.read handlerRef)
-      queueOrRun pendingOuts (handler o)
+      queueIfOpenOrRunIfClosed pendingOuts (handler o)
       pure a
     Par (HalogenAp p) ->
       sequential $ retractFreeAp $ hoistFreeAp (parallel <<< evalM render ref) p
@@ -130,34 +144,46 @@ evalM render initRef (HalogenM hm) = foldFree (go initRef) hm
       doneRef <- liftEffect (Ref.new false)
       fiber <- fork $ finally
         (liftEffect do
-          Ref.modify_ (M.delete fid) forks
+          Ref.modify_ (Data.Map.delete fid) forks
           Ref.write true doneRef)
         (evalM render ref hmu)
       liftEffect $ unlessM (Ref.read doneRef) do
-        Ref.modify_ (M.insert fid fiber) forks
+        Ref.modify_ (Data.Map.insert fid fiber) forks
       pure (k fid)
     Kill fid a -> do
       DriverState ({ forks }) <- liftEffect (Ref.read ref)
       forkMap <- liftEffect (Ref.read forks)
-      traverse_ (killFiber (error "Cancelled")) (M.lookup fid forkMap)
+      traverse_ (killFiber (error "Cancelled")) (Data.Map.lookup fid forkMap)
       pure a
     GetRef (Input.RefLabel p) k -> do
       DriverState { component, refs } <- liftEffect (Ref.read ref)
-      pure $ k $ M.lookup p refs
+      pure $ k $ Data.Map.lookup p refs
 
-  evalChildQuery
+  evalChildQuery -- this is executed by parent container driver, it contains the `children :: SlotStorage`
     :: forall s' f' act' ps' i' o' a'
      . Ref (DriverState h r s' f' act' ps' i' o')
-    -> CQ.ChildQueryBox ps' a'
+    -> CQ.ChildQueryX ps' a'
     -> Aff a'
   evalChildQuery ref cqb = do
     DriverState st <- liftEffect (Ref.read ref)
-    CQ.unChildQueryBox (\(CQ.ChildQuery unpack query reply) -> do
+    CQ.unChildQueryX (
       let
-        evalChild (DriverStateRef var) = parallel do
-          dsx <- liftEffect (Ref.read var)
-          unDriverStateX (\ds -> evalQ render ds.selfRef query) dsx
-      reply <$> sequential (unpack evalChild st.children)) cqb
+        myfunc :: forall query'' o'' f'' nextComputationFn'' . CQ.ChildQuery ps' query'' o'' a' f'' nextComputationFn'' -> Aff a'
+        myfunc (CQ.ChildQuery
+          (execEvaluatorForSelectedChildren :: forall slot m. Applicative m => (slot query'' o'' -> m (Maybe nextComputationFn'')) -> Halogen.Data.Slot.SlotStorage ps' slot -> m (f'' nextComputationFn'')) -- `f` here is `Maybe` for `query` and `Map slotIndex` for `queryAll` (without slotIndexes that responded Nothing)
+          (query :: query'' nextComputationFn'')
+          (reply :: f'' nextComputationFn'' -> a')) -- identity
+          = do
+          let
+            evalChild :: DriverStateXRef h r query'' o'' -> ParAff (Maybe nextComputationFn'') -- for each child executed in parallel, intil `Free.Pure` is not returned
+            evalChild (DriverStateXRef var) = parallel do
+              (dsxOfChild) <- liftEffect (Ref.read var)
+              -- HOW QUERYING WORKS 2
+              unDriverStateX (\ds -> evalQ (render :: Renderer h r) ds.selfRef query) dsxOfChild
+          reply <$> sequential (execEvaluatorForSelectedChildren evalChild st.children) -- execEvaluatorForSelectedChildren is different for `query` or `queryAll`
+      in
+        myfunc
+    ) cqb
 
 unsubscribe
   :: forall h r s' f' act' ps' i' o'
@@ -167,15 +193,15 @@ unsubscribe
 unsubscribe sid ref = do
   DriverState ({ subscriptions }) <- liftEffect (Ref.read ref)
   subs <- liftEffect (Ref.read subscriptions)
-  traverse_ ES.finalize (M.lookup sid =<< subs)
+  traverse_ ES.finalize (Data.Map.lookup sid =<< subs)
 
-handleLifecycle :: Ref LifecycleHandlers -> Effect ~> Aff
-handleLifecycle lchs f = do
-  liftEffect $ Ref.write { initializers: L.Nil, finalizers: L.Nil } lchs
-  result <- liftEffect f
-  { initializers, finalizers } <- liftEffect $ Ref.read lchs
-  traverse_ fork finalizers
-  parSequence_ initializers
+runLifecycleAround :: Ref LifecycleHandlers -> Effect ~> Aff
+runLifecycleAround lchs f = do
+  liftEffect $ Ref.write { initializers: Data.List.Nil, finalizers: Data.List.Nil } lchs -- empty if not empty
+  result <- liftEffect f -- populate, render
+  { initializers, finalizers } <- liftEffect $ Ref.read lchs -- read again
+  traverse_ fork finalizers -- run and dont wait
+  parSequence_ initializers -- run and wait
   pure result
 
 fresh
@@ -185,13 +211,13 @@ fresh
   -> Aff a
 fresh f ref = do
   DriverState st <- liftEffect (Ref.read ref)
-  liftEffect $ Ref.modify' (\i -> { state: i + 1, value: f i }) st.fresh
+  liftEffect $ Ref.modify' (\i -> { state: i + 1, value: f i }) st.fresh -- modify state and produce value at once
 
-queueOrRun
+queueIfOpenOrRunIfClosed
   :: Ref (Maybe (List (Aff Unit)))
   -> Aff Unit
   -> Aff Unit
-queueOrRun ref au =
+queueIfOpenOrRunIfClosed ref au =
   liftEffect (Ref.read ref) >>= case _ of
-    Nothing -> au
-    Just p -> liftEffect $ Ref.write (Just (au : p)) ref
+    Nothing -> au -- closed - run immidiately
+    Just p -> liftEffect $ Ref.write (Just (au : p)) ref -- open - queue

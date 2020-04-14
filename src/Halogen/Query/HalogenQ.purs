@@ -5,12 +5,13 @@ import Prelude
 import Data.Bifunctor (class Bifunctor)
 import Data.Coyoneda (Coyoneda)
 
+-- subset of HalogenM, events for evaluator
 data HalogenQ query action input a
   = Initialize a
   | Finalize a
   | Receive input a
   | Action action a
-  | Query (Coyoneda query a) (Unit → a)
+  | Query (Coyoneda query a) (Unit → a) -- { req :: forall i . Tuple (query i) (i -> a), f :: Unit -> a }
 
 instance bifunctorHalogenQ :: Bifunctor (HalogenQ query action) where
   bimap f g = case _ of

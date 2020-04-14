@@ -32,7 +32,7 @@ data Slot (query :: Type -> Type) output slotIndex
 newtype SlotStorage
   -- phantom type, keys are Symbols, values are slot
   (slots :: # Type)
-  -- Map value, this is what is stored in AnySlot
+  -- Map value, this is what is stored in AnySlot??? `SlotStorage ps (DriverStateXRef h r)`
   (slot :: (Type -> Type) -- query
         -> Type -- output/message
         -> Type

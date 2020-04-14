@@ -31,12 +31,12 @@ import Prim.Row as Row
 import Web.DOM (Element)
 
 -- | The Halogen component eval algebra.
-data HalogenF state action slots output m a
+data HalogenF state action (slots :: # Type) output m a
   = State (state -> Tuple a state)
   | Subscribe (SubscriptionId -> ES.EventSource m action) (SubscriptionId -> a)
   | Unsubscribe SubscriptionId a
   | Lift (m a)
-  | ChildQuery (CQ.ChildQueryBox slots a)
+  | ChildQuery (CQ.ChildQueryX slots a) -- childQuery came or childQuery issued??
   | Raise output a
   | Par (HalogenAp state action slots output m a)
   | Fork (HalogenM state action slots output m Unit) (ForkId -> a)
@@ -111,30 +111,35 @@ raise o = HalogenM $ liftF $ Raise o unit
 
 -- | Sends a query to a child of a component at the specified slot.
 query
-  :: forall state action output m label slots query output' slotIndex a _1
+  :: forall state action output m label slots query output' slotIndex nextComputationFn _1
    . Row.Cons label (Slot query output' slotIndex) _1 slots
   => IsSymbol label
   => Ord slotIndex
   => SProxy label
   -> slotIndex
-  -> query a
-  -> HalogenM state action slots output m (Maybe a)
-query label p q = HalogenM $ liftF $ ChildQuery $ CQ.mkChildQueryBox $
-  CQ.ChildQuery (\k → maybe (pure Nothing) k <<< Slot.lookup label p) q identity
+  -> query nextComputationFn
+  -> HalogenM state action slots output m (Maybe nextComputationFn)
+-- HOW QUERYING WORKS 1 : parent component issues query, `nextComputationFn :: RespOrUnit -> Unit`
+-- lookup slot (TODO: what is fucking slot???)
+query label slotIndex q = HalogenM $ liftF $ ChildQuery $ CQ.mkChildQueryX $
+  CQ.ChildQuery (\evalChild slotStorage → maybe (pure Nothing) evalChild $ Slot.lookup label slotIndex slotStorage) q identity
 
 -- | Sends a query to all children of a component at a given slot label.
 queryAll
-  :: forall state action output m label slots query output' slotIndex a _1
-   . Row.Cons label (Slot query output' slotIndex) _1 slots
+  :: forall state action output parAffM label slots query slotIndex a otherSlots
+   . Row.Cons label (Slot query output slotIndex) otherSlots slots
   => IsSymbol label
   => Ord slotIndex
   => SProxy label
   -> query a
-  -> HalogenM state action slots output m (Map slotIndex a)
+  -> HalogenM state action slots output parAffM (Map slotIndex a)
 queryAll label q =
-  HalogenM $ liftF $ ChildQuery $ CQ.mkChildQueryBox $
-    CQ.ChildQuery (\k -> map catMapMaybes <<< traverse k <<< Slot.slots label) q identity
+  HalogenM $ liftF $ ChildQuery $ CQ.mkChildQueryX $
+    CQ.ChildQuery go q identity
   where
+    go :: forall slot parAffM . Applicative parAffM => (slot query output -> parAffM (Maybe a)) -> Slot.SlotStorage slots slot -> parAffM (Map slotIndex a)
+    go evalChild slotStorage = map catMapMaybes <<< traverse evalChild <<< Slot.slots label $ slotStorage
+
     catMapMaybes ∷ forall k v. Ord k ⇒ Map k (Maybe v) -> Map k v
     catMapMaybes = foldrWithIndex (\k v acc → maybe acc (flip (Map.insert k) acc) v) Map.empty
 

@@ -40,7 +40,7 @@ hashChangeConsumer
 hashChangeConsumer query = CR.consumer \event -> do
   let hash = Str.drop 1 $ Str.dropWhile (_ /= '#') $ HCE.newURL event
   void $ query $ H.tell $ RouteLog.ChangeRoute hash
-  pure Nothing
+  pure Nothing -- `Nothing` to continue listen, `Just a` to stop
 
 main :: Effect Unit
 main = HA.runHalogenAff do
