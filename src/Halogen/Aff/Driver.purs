@@ -118,17 +118,17 @@ runUI
   -> i
   -> Aff (HalogenIO query o Aff)
 runUI renderSpec component i = do
-  lchs <- liftEffect newLifecycleHandlers
+  rootLchsRef <- liftEffect newLifecycleHandlers
   fresh <- liftEffect $ Ref.new 0
   disposed <- liftEffect $ Ref.new false
-  Eval.runLifecycleAround lchs do -- TODO: for static render I'll have to run it without initializers, except there is no out queries
+  Eval.runLifecycleAround rootLchsRef do -- TODO: for static render I'll have to run it without initializers, except there is no out queries
     listeners <- Ref.new M.empty
-    dsx <- Ref.read =<< runComponent lchs (rootOutputHandler listeners) i component
+    dsx <- Ref.read =<< runComponent rootLchsRef (rootOutputHandler listeners) i component
     unDriverStateX (\st ->
       pure
         { query: evalDriver disposed st.selfRef
         , subscribe: rootSubscribe fresh listeners
-        , dispose: rootDispose disposed lchs dsx listeners
+        , dispose: rootDispose disposed rootLchsRef dsx listeners
         }) dsx
 
   where
@@ -176,22 +176,22 @@ runUI renderSpec component i = do
     -> i' -- current component input
     -> Component h query' i' o' Aff -- this is eq to ComponentSpec
     -> Effect (Ref (DriverStateX h r query' o'))
-  runComponent lchsRef {- parent/global/rootLchsRef ??? -} outputHandler input = unComponent \componentSpec -> do
+  runComponent rootLchsRef outputHandler input = unComponent \componentSpec -> do
     lchsRef' <- newLifecycleHandlers -- new
     driverStateXRef <- initDriverState componentSpec input outputHandler lchsRef' -- driver with new
-    lchsPrev <- Ref.read lchsRef
-    Ref.write { initializers: L.Nil, finalizers: lchsPrev.finalizers } lchsRef -- remove initializers from old, WHY??
-    unDriverStateX (render lchsRef <<< _.selfRef) =<< Ref.read driverStateXRef -- render thyself with old
+    lchsPrev <- Ref.read rootLchsRef
+    Ref.write { initializers: L.Nil, finalizers: lchsPrev.finalizers } rootLchsRef -- remove initializers from old, WHY??
+    unDriverStateX (render rootLchsRef <<< _.selfRef) =<< Ref.read driverStateXRef -- render thyself with old
 
     -- join onto lchsRef:
     --   this component lchsRef (was empty, populated during render)
     --   parentInitializer (provided by user, from driver)
-    --   pendingQueries (driver)
-    --   pendingOuts (driver)
+    --   pendingQueries (driver) (and closes it to make it executeable immediately)
+    --   pendingOuts (driver) (and closes it to make it executeable immediately)
     --   lchsPrev.initializers
 
     --   driverState.initializers (lchsRef') is ignored, WHY??
-    squashChildInitializers lchsRef lchsPrev.initializers =<< Ref.read driverStateXRef -- lchsRef is populated again, append also old initializers
+    squashChildInitializers rootLchsRef lchsPrev.initializers =<< Ref.read driverStateXRef -- lchsRef is populated again, append also old initializers
     pure driverStateXRef
 
   render
@@ -199,8 +199,8 @@ runUI renderSpec component i = do
      . Ref LifecycleHandlers
     -> Ref (DriverState h r state query' act ps i' o')
     -> Effect Unit
-  render lchsRef var = Ref.read var >>= \(DriverState ds) -> do
-    shouldProcessHandlers <- isNothing <$> Ref.read ds.pendingHandlers
+  render rootLchsRef var = Ref.read var >>= \(DriverState ds) -> do
+    shouldProcessHandlers <- isNothing <$> Ref.read ds.pendingHandlers -- suspend actions during rendering
     when shouldProcessHandlers $ Ref.write (Just L.Nil) ds.pendingHandlers -- open
     Ref.write Slot.empty ds.childrenOut
     Ref.write ds.children ds.childrenIn -- ds.children is empty on first render
@@ -208,18 +208,23 @@ runUI renderSpec component i = do
       -- The following 3 defs are working around a capture bug, see #586
       -- identity here is to prevent accessors inlining back, and prevent memory leak
       pendingHandlers = identity ds.pendingHandlers
-      pendingQueries = identity ds.pendingQueries -- TODO: panding messages???????
+      pendingQueries = identity ds.pendingQueries -- TODO: rename to pendingChildHandlers (contains actions to execute inputHandlers), it is open queue on initial rendering, and closed/executed immediately after initial rendering, while inputHandler is open during rendering for each child and closed/immediate in all other times
       selfRef = identity ds.selfRef
 
       inputHandler :: Input act -> Aff Unit
       inputHandler = Eval.queueIfOpenOrRunIfClosed pendingHandlers <<< void <<< Eval.evalInput render selfRef -- on input - add to queue
 
-      childInputHandler :: act -> Aff Unit
+      -- user clicks on button
+      -- inputHandler, evalInput
+      -- Receive executed
+      -- handler to pendingOuts
+
+      childInputHandler :: act -> Aff Unit -- this action will be stored in driver.handlerRef of each child
       childInputHandler = Eval.queueIfOpenOrRunIfClosed pendingQueries <<< inputHandler <<< Input.Action -- messages from child to parent, reuse inputHandler machinery (TODO: we queue )
     (rendering :: r state act ps o') <-
       renderSpec.render -- this is when VDOM is rendered
         (handleAff <<< inputHandler) -- how to handle input
-        (renderChild lchsRef childInputHandler ds.childrenIn ds.childrenOut) -- how to render child
+        (renderChild rootLchsRef childInputHandler ds.childrenIn ds.childrenOut) -- how to render child
         (ds.component.render ds.state) -- html
         ds.rendering -- current rendering state, Nothing if first time
     children <- Ref.read ds.childrenOut
@@ -229,7 +234,7 @@ runUI renderSpec component i = do
     Slot.foreachSlot childrenIn \(DriverStateXRef childDriverStateXRef) -> do -- render each child TODO: wtf
       childDriverState <- Ref.read childDriverStateXRef
       renderStateX_ renderSpec.removeChild childDriverState -- remove all children from DOM
-      collectFinalizersWithCleanSubsEffect lchsRef childDriverState -- TODO: shouldnt it execute finalizers???
+      collectFinalizersWithCleanSubsEffect rootLchsRef childDriverState -- TODO: shouldnt it execute finalizers???
 
     flip Ref.modify_ ds.selfRef $ mapDriverState \ds' ->
       ds' { rendering = Just rendering, children = children } -- update
@@ -252,7 +257,7 @@ runUI renderSpec component i = do
     -> Ref (Slot.SlotStorage ps (DriverStateXRef h r)) -- out - on start - empty, on end - rendered children and thus should be preserved
     -> ComponentSlotSpecX h ps Aff act
     -> Effect (RenderStateX r)
-  renderChild lchsRef outputHandler childrenInRef childrenOutRef = -- when vdom reached child widget to render
+  renderChild rootLchsRef outputHandler childrenInRef childrenOutRef = -- when vdom reached child widget to render
     unComponentSlotSpecX \componentSlotSpec -> do
       popChildResult <- componentSlotSpec.pop <$> Ref.read childrenInRef
 
@@ -275,7 +280,7 @@ runUI renderSpec component i = do
           case componentSlotSpec.input of
             Halogen.Query.HalogenQ.Receive slotInput _ ->
               runComponent
-                lchsRef
+                rootLchsRef
                 (maybe (pure unit) outputHandler <<< componentSlotSpec.outputToAction) -- how to handle output: transform and handle with VDOM handler
                 slotInput
                 componentSlotSpec.component
@@ -299,7 +304,7 @@ runUI renderSpec component i = do
     -> L.List (Aff Unit)
     -> DriverStateX h r query' o'
     -> Effect Unit
-  squashChildInitializers lchsRef prevInits =
+  squashChildInitializers rootLchsRef prevInits =
     unDriverStateX \st -> do
       let
         parentInitializer :: Aff Unit
@@ -312,24 +317,24 @@ runUI renderSpec component i = do
               handlePending st.pendingQueries -- after initial rendering pendingOuts and pendingQueries will be executed immediately
               handlePending st.pendingOuts) : prevInits
         , finalizers: lchs.finalizers
-        }) lchsRef
+        }) rootLchsRef
 
   collectFinalizersWithCleanSubsEffect
     :: forall query' o'
      . Ref LifecycleHandlers
     -> DriverStateX h r query' o'
     -> Effect Unit
-  collectFinalizersWithCleanSubsEffect lchsRef = do
+  collectFinalizersWithCleanSubsEffect rootLchsRef = do
     unDriverStateX \st -> do
       cleanupSubscriptionsAndForks (DriverState st)
       let thisComponentFinalizer = Eval.evalM render st.selfRef (st.component.eval (Halogen.Query.HalogenQ.Finalize unit))
       Ref.modify_ (\handlers ->
         { initializers: handlers.initializers
         , finalizers: thisComponentFinalizer : handlers.finalizers
-        }) lchsRef
+        }) rootLchsRef
       Slot.foreachSlot st.children \(DriverStateXRef ref) -> do
         dsx <- Ref.read ref
-        collectFinalizersWithCleanSubsEffect lchsRef dsx
+        collectFinalizersWithCleanSubsEffect rootLchsRef dsx
 
   rootDispose :: forall query' o'
      . Ref Boolean
@@ -337,14 +342,14 @@ runUI renderSpec component i = do
     -> DriverStateX h r query' o'
     -> Ref (M.Map Int (AVar.AVar o'))
     -> Aff Unit
-  rootDispose disposed lchsRef dsx listenersRef = Eval.runLifecycleAround lchsRef do -- this is when collected finalizers are beign run
+  rootDispose disposed rootLchsRef dsx listenersRef = Eval.runLifecycleAround rootLchsRef do -- this is when collected finalizers are beign run
     Ref.read disposed >>=
       if _
         then pure unit
         else do
           Ref.write true disposed
           traverse_ (launchAff_ <<< AVar.kill (error "disposed")) =<< Ref.read listenersRef
-          collectFinalizersWithCleanSubsEffect lchsRef dsx
+          collectFinalizersWithCleanSubsEffect rootLchsRef dsx
           unDriverStateX (traverse_ renderSpec.dispose <<< _.rendering) dsx
 
 newLifecycleHandlers :: Effect (Ref LifecycleHandlers)
