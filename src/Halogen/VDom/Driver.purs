@@ -213,9 +213,10 @@ renderSpecHydrate document element =
      . (Input action -> Effect Unit)
     -> (ComponentSlotBox HTML slots Aff action -> Effect (RenderStateX RenderState))
     -> HTML (ComponentSlot HTML slots Aff action) action
+    -> Boolean
     -> Maybe (RenderState state action slots output)
     -> Effect (RenderState state action slots output)
-  render handler child (HTML vdom) =
+  render handler child (HTML vdom) isRoot =
     case _ of
       Nothing -> do
         renderChildRef <- Ref.new child
