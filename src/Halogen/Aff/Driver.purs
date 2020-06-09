@@ -34,6 +34,7 @@ import Halogen.Query.EventSource as ES
 import Halogen.Query.HalogenQ as HQ
 import Halogen.Query.Input (Input)
 import Halogen.Query.Input as Input
+import Debug.Trace
 
 -- | `RenderSpec` allows for alternative driver implementations without the need
 -- | to provide all of the driver machinery again, focusing just on the code
@@ -173,6 +174,7 @@ runUI renderSpec component i = do
     -> Component h f' i' o' Aff
     -> Effect (Ref (DriverStateX h r f' o'))
   runComponent isRoot lchs handler j = unComponent \c -> do
+    traceM { message: "runComponent", input: j, component: c }
     lchs' <- newLifecycleHandlers
     var <- initDriverState c j handler lchs'
     pre <- Ref.read lchs

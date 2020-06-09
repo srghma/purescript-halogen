@@ -3,6 +3,7 @@ module Halogen.VDom.Driver
   , module Halogen.Aff.Driver
   ) where
 
+import Debug.Trace
 import Prelude
 
 import Data.Foldable (traverse_)
@@ -24,6 +25,7 @@ import Halogen.VDom as V
 import Halogen.VDom.DOM.Prop as VP
 import Halogen.VDom.Thunk (Thunk)
 import Halogen.VDom.Thunk as Thunk
+import Unsafe.Coerce (unsafeCoerce)
 import Unsafe.Reference (unsafeRefEq)
 import Web.DOM.Document (Document) as DOM
 import Web.DOM.Element (Element) as DOM
@@ -159,20 +161,26 @@ renderSpec document container =
   render handler child (HTML vdom) isRoot =
     case _ of
       Nothing -> do
+        traceM { message: "renderState with new", vdom }
         renderChildRef <- Ref.new child
-        let spec = mkSpec handler renderChildRef document
+        let spec = mkSpec handler renderChildRef document -- new spec for each component
         machine <- EFn.runEffectFn1 (V.buildVDom spec) vdom
         let node = V.extract machine
+        traceM { message: "renderState with new after", vdom, node: (unsafeCoerce node).outerHTML, isRoot }
         when isRoot do
           void $ DOM.appendChild node (HTMLElement.toNode container)
         pure $ RenderState { machine, node, renderChildRef }
       Just (RenderState { machine, node, renderChildRef }) -> do
+        renderChildOld <- Ref.read renderChildRef
+        traceM { message: "renderState with not new", same: unsafeRefEq renderChildOld child, machine, node: (unsafeCoerce node).outerHTML, renderChildRef, renderChildOld, child }
         Ref.write child renderChildRef
-        parent <- DOM.parentNode node
+        parent <- DOM.parentNode node -- get parent node of current node while it is yet attached to the DOM (becuase step may remove it with .removeChild() method)
         nextSib <- DOM.nextSibling node
         machine' <- EFn.runEffectFn2 V.step machine vdom
         let newNode = V.extract machine'
+        traceM { message: "renderState with not new after", newNode: (unsafeCoerce newNode).outerHTML }
         when (not unsafeRefEq node newNode) do
+          traceM { message: "renderState with not new -> will call substInParent", node: (unsafeCoerce node).outerHTML, newNode: (unsafeCoerce newNode).outerHTML }
           substInParent newNode nextSib parent
         pure $ RenderState { machine: machine', node: newNode, renderChildRef }
 
