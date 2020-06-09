@@ -163,7 +163,7 @@ renderSpec document container =
     case _ of
       Nothing -> do
         childRendererRef <- Ref.new childRenderer
-        let spec = mkSpec inputHandler childRendererRef document -- pass low level VdomSpec to intermediate level `runUI` function
+        let spec = mkSpec inputHandler childRendererRef document -- new spec for each component
         machine <- EFn.runEffectFn1 (V.buildVDom spec) vdom -- buildVDOM
         let node = V.extract machine
         void $ DOM.appendChild node (HTMLElement.toNode container) -- if element is already added to some node as a child - it is removed first and appended to the end of new parent (even if it is the same parent)
