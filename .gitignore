@@ -1,4 +1,5 @@
 .*
+!spago.dhall
 !.gitignore
 !.eslintrc.json
 !.travis.yml
