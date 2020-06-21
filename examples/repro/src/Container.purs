@@ -5,10 +5,12 @@ import Prelude
 
 import Data.Maybe (Maybe(..))
 import Data.Symbol (SProxy(..))
+import Data.Tuple (Tuple(..))
 import Example.Repro.Button1 as Example.Repro.Button1
 import Example.Repro.Button2 as Example.Repro.Button2
 import Halogen as H
 import Halogen.HTML as HH
+import Halogen.HTML.Elements.Keyed as HK
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 
@@ -68,7 +70,10 @@ render state =
         [ HE.onClick \_ -> Just TogglePage
         ]
         [ HH.text "Toggle page" ]
-    , HH.slot (SProxy :: SProxy "page") unit (pageToPageComponent state.page) unit absurd
+    -- | , HK.div_
+    -- |   [ Tuple (showPage state.page) (HH.slot (SProxy :: SProxy "page") unit (pageToPageComponent state.page) unit absurd)
+    -- |   ]
+    , HH.slot (SProxy :: SProxy "page") (showPage state.page) (pageToPageComponent state.page) unit absurd
     ]
 
 handleAction ∷ forall o m. Action → H.HalogenM State Action _ o m Unit
