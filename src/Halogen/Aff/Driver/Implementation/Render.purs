@@ -30,15 +30,15 @@ import Halogen.Query.Input as Input
 -- | Functions, implemented using the `XxxxImplementation` functions, but specific to rendering, and not hydration.
 
 render
-  :: forall s f act ps i o r
-   . RenderSpec r
+  :: forall s f act ps i o r h
+   . RenderSpec h r
   -> Boolean
   -> Ref LifecycleHandlers
-  -> Ref (DriverState r s f act ps i o)
+  -> Ref (DriverState h r s f act ps i o)
   -> Effect Unit
 render renderSpec isRoot lchs var = renderImplementation renderSpec isRoot lchs var runRender
   where
-  runRender :: (Input act -> Aff Unit) -> (act -> Aff Unit) -> DriverStateRec r s f act ps i o -> Effect (r s act ps o)
+  runRender :: (Input act -> Aff Unit) -> (act -> Aff Unit) -> DriverStateRec h r s f act ps i o -> Effect (r s act ps o)
   runRender handler childHandler ds =
     renderSpec.render
       (Eval.handleAff <<< handler)
@@ -48,17 +48,17 @@ render renderSpec isRoot lchs var = renderImplementation renderSpec isRoot lchs 
       ds.rendering
 
 renderChild
-  :: forall ps act r
-   . RenderSpec r
+  :: forall ps act r h
+   . RenderSpec h r
   -> Ref LifecycleHandlers
   -> (act -> Aff Unit)
-  -> Ref (Slot.SlotStorage ps (DriverStateRef r))
-  -> Ref (Slot.SlotStorage ps (DriverStateRef r))
-  -> ComponentSlotBox ps Aff act
+  -> Ref (Slot.SlotStorage ps (DriverStateRef h r))
+  -> Ref (Slot.SlotStorage ps (DriverStateRef h r))
+  -> ComponentSlotBox h ps Aff act
   -> Effect (RenderStateX r)
 renderChild renderSpec lchs handler childrenInRef childrenOutRef = renderChildImplementation renderSpec lchs handler childrenInRef childrenOutRef renderWithExistingChildrenState renderNew
   where
-  renderWithExistingChildrenState :: forall query input output. ComponentSlotSpec query input output ps Aff act -> Tuple (DriverStateRef r query output) (Slot.SlotStorage ps (DriverStateRef r)) -> Effect (Ref (DriverStateX r query output))
+  renderWithExistingChildrenState :: forall query input output. ComponentSlotSpec h query input output ps Aff act -> Tuple (DriverStateRef h r query output) (Slot.SlotStorage ps (DriverStateRef h r)) -> Effect (Ref (DriverStateX h r query output))
   renderWithExistingChildrenState slot (Tuple (DriverStateRef existing) childrenIn') = do
     Ref.write childrenIn' childrenInRef
     dsx <- Ref.read existing
@@ -67,32 +67,32 @@ renderChild renderSpec lchs handler childrenInRef childrenOutRef = renderChildIm
       Eval.handleAff $ Eval.evalM (render renderSpec false) st.selfRef (st.component.eval (HQ.Receive slot.input unit))) dsx
     pure existing
 
-  renderNew :: forall query input output. ComponentSlotSpec query input output ps Aff act -> Effect (Ref (DriverStateX r query output))
+  renderNew :: forall query input output. ComponentSlotSpec h query input output ps Aff act -> Effect (Ref (DriverStateX h r query output))
   renderNew slot = runComponent renderSpec false lchs (maybe (pure unit) handler <<< slot.output) slot.input slot.component
 
 runComponent
-  :: forall f i o r
-   . RenderSpec r
+  :: forall f i o r h
+   . RenderSpec h r
   -> Boolean
   -> Ref LifecycleHandlers
   -> (o -> Aff Unit)
   -> i
-  -> Component f i o Aff
-  -> Effect (Ref (DriverStateX r f o))
+  -> Component h f i o Aff
+  -> Effect (Ref (DriverStateX h r f o))
 runComponent renderSpec isRoot lchs handler j = runComponentImplementation renderSpec isRoot lchs handler j runRender
   where
-    runRender :: DriverStateX r f o -> Effect Unit
+    runRender :: DriverStateX h r f o -> Effect Unit
     runRender = unDriverStateX (render renderSpec isRoot lchs <<< _.selfRef)
 
 -- | Functions, containing common code used for implementing hydration and rendering functions
 
 renderImplementation
-  :: forall s f act ps i o r
-   . RenderSpec r
+  :: forall s f act ps i o r h
+   . RenderSpec h r
   -> Boolean
   -> Ref LifecycleHandlers
-  -> Ref (DriverState r s f act ps i o)
-  -> ((Input act -> Aff Unit) -> (act -> Aff Unit) -> DriverStateRec r s f act ps i o -> Effect (r s act ps o))
+  -> Ref (DriverState h r s f act ps i o)
+  -> ((Input act -> Aff Unit) -> (act -> Aff Unit) -> DriverStateRec h r s f act ps i o -> Effect (r s act ps o))
   -> Effect Unit
 renderImplementation renderSpec isRoot lchs var runRender = Ref.read var >>= \(DriverState ds) -> do
   shouldProcessHandlers <- isNothing <$> Ref.read ds.pendingHandlers
@@ -107,7 +107,7 @@ renderImplementation renderSpec isRoot lchs var runRender = Ref.read var >>= \(D
     pendingQueries :: Ref (Maybe (List (Aff Unit)))
     pendingQueries = identity ds.pendingQueries
 
-    selfRef :: Ref (DriverState r s f act ps i o)
+    selfRef :: Ref (DriverState h r s f act ps i o)
     selfRef = identity ds.selfRef
 
     handler :: Input act -> Aff Unit
@@ -135,15 +135,15 @@ renderImplementation renderSpec isRoot lchs var runRender = Ref.read var >>= \(D
         else pure $ Loop unit
 
 renderChildImplementation
-  :: forall ps act r
-   . RenderSpec r
+  :: forall ps act r h
+   . RenderSpec h r
   -> Ref LifecycleHandlers
   -> (act -> Aff Unit)
-  -> Ref (Slot.SlotStorage ps (DriverStateRef r))
-  -> Ref (Slot.SlotStorage ps (DriverStateRef r))
-  -> (forall query input output. ComponentSlotSpec query input output ps Aff act -> Tuple (DriverStateRef r query output) (Slot.SlotStorage ps (DriverStateRef r)) -> Effect (Ref (DriverStateX r query output)))
-  -> (forall query input output. ComponentSlotSpec query input output ps Aff act -> Effect (Ref (DriverStateX r query output)))
-  -> ComponentSlotBox ps Aff act
+  -> Ref (Slot.SlotStorage ps (DriverStateRef h r))
+  -> Ref (Slot.SlotStorage ps (DriverStateRef h r))
+  -> (forall query input output. ComponentSlotSpec h query input output ps Aff act -> Tuple (DriverStateRef h r query output) (Slot.SlotStorage ps (DriverStateRef h r)) -> Effect (Ref (DriverStateX h r query output)))
+  -> (forall query input output. ComponentSlotSpec h query input output ps Aff act -> Effect (Ref (DriverStateX h r query output)))
+  -> ComponentSlotBox h ps Aff act
   -> Effect (RenderStateX r)
 renderChildImplementation renderSpec lchs handler childrenInRef childrenOutRef renderWithExistingChildrenState renderNew =
   unComponentSlot \slot -> do
@@ -160,15 +160,15 @@ renderChildImplementation renderSpec lchs handler childrenInRef childrenOutRef r
       Just r -> pure (renderSpec.renderChild r)
 
 runComponentImplementation
-  :: forall f i o r
-   . RenderSpec r
+  :: forall f i o r h
+   . RenderSpec h r
   -> Boolean
   -> Ref LifecycleHandlers
   -> (o -> Aff Unit)
   -> i
-  -> (DriverStateX r f o -> Effect Unit)
-  -> Component f i o Aff
-  -> Effect (Ref (DriverStateX r f o))
+  -> (DriverStateX h r f o -> Effect Unit)
+  -> Component h f i o Aff
+  -> Effect (Ref (DriverStateX h r f o))
 runComponentImplementation renderSpec isRoot lchs handler j runRender = unComponent \c -> do
   lchs' <- Utils.newLifecycleHandlers
   var <- initDriverState c j handler lchs'
@@ -181,12 +181,12 @@ runComponentImplementation renderSpec isRoot lchs handler j runRender = unCompon
 -- | Utility function that use rendering inside
 
 squashChildInitializers
-  :: forall f o r
-   . RenderSpec r
+  :: forall f o r h
+   . RenderSpec h r
   -> Boolean
   -> Ref LifecycleHandlers
   -> L.List (Aff Unit)
-  -> DriverStateX r f o
+  -> DriverStateX h r f o
   -> Effect Unit
 squashChildInitializers renderSpec isRoot lchs preInits =
   unDriverStateX \st -> do
@@ -202,11 +202,11 @@ squashChildInitializers renderSpec isRoot lchs preInits =
       }) lchs
 
 finalize
-  :: forall f o r
-   . RenderSpec r
+  :: forall f o r h
+   . RenderSpec h r
   -> Boolean
   -> Ref LifecycleHandlers
-  -> DriverStateX r f o
+  -> DriverStateX h r f o
   -> Effect Unit
 finalize renderSpec isRoot lchs = do
   unDriverStateX \st -> do

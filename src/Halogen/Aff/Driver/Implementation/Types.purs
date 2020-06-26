@@ -70,12 +70,12 @@ import Web.DOM.Node (Node) as DOM
 -- |
 -- | The `dispose` function is called when the top level component is disposed of
 -- | via `HalogenIO`.
-type RenderSpec r =
+type RenderSpec h r =
   { render
       :: forall s act ps o
        . (Input act -> Effect Unit)
-      -> (ComponentSlotBox ps Aff act -> Effect (RenderStateX r))
-      -> HC.HTML (ComponentSlot ps Aff act) act
+      -> (ComponentSlotBox h ps Aff act -> Effect (RenderStateX r))
+      -> h (ComponentSlot h ps Aff act) act
       -> Boolean
       -> Maybe (r s act ps o)
       -> Effect (r s act ps o)
@@ -85,13 +85,13 @@ type RenderSpec r =
   }
 
 type RenderSpecWithHydration r =
-  { renderSpec :: RenderSpec r
+  { renderSpec :: RenderSpec HC.HTML r
   , hydrate
       :: forall s act ps o
        . (Input act -> Effect Unit)
-      -> (ComponentSlotBox ps Aff act -> Effect (RenderStateX r))
-      -> (ComponentSlotBox ps Aff act -> DOM.Node -> Effect (RenderStateX r))
-      -> HC.HTML (ComponentSlot ps Aff act) act
+      -> (ComponentSlotBox HC.HTML ps Aff act -> Effect (RenderStateX r))
+      -> (ComponentSlotBox HC.HTML ps Aff act -> DOM.Node -> Effect (RenderStateX r))
+      -> HC.HTML (ComponentSlot HC.HTML ps Aff act) act
       -> DOM.Node
       -> Effect (r s act ps o)
   }

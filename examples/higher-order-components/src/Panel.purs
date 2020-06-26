@@ -38,8 +38,8 @@ _inner = SProxy
 
 component
   :: forall q i o m
-   . H.Component q i o m
-  -> H.Component (Query q) i (Message o) m
+   . H.Component HH.HTML q i o m
+  -> H.Component HH.HTML (Query q) i (Message o) m
 component innerComponent =
   H.mkComponent
     { initialState
@@ -55,7 +55,7 @@ initialState = { input: _, open: false }
 
 render
   :: forall q i o m
-   . H.Component q i o m
+   . H.Component HH.HTML q i o m
   -> State i
   -> H.ComponentHTML (Action o) (ChildSlots q o) m
 render innerComponent state
