@@ -27,9 +27,9 @@ import Halogen.HTML (HTML)
 import Web.DOM.Node (Node) as DOM
 
 runImplementation
-  :: forall r f o h
-   . RenderSpec h r
-  -> (Ref.Ref LifecycleHandlers -> Event.EventIO o -> Effect (Ref.Ref (DriverStateX h r f o)))
+  :: forall r f o surface
+   . RenderSpec surface r
+  -> (Ref.Ref LifecycleHandlers -> Event.EventIO o -> Effect (Ref.Ref (DriverStateX surface r f o)))
   -> Aff (HalogenIO f o Aff)
 runImplementation renderSpec runComponentImplementation = do
   lchs <- liftEffect Utils.newLifecycleHandlers
@@ -46,10 +46,10 @@ runImplementation renderSpec runComponentImplementation = do
         }) dsx
 
 evalDriver
-  :: forall s f act ps i o r h
-   . RenderSpec h r
+  :: forall s f act ps i o r surface
+   . RenderSpec surface r
   -> Ref Boolean
-  -> Ref (DriverState h r s f act ps i o)
+  -> Ref (DriverState surface r s f act ps i o)
   -> forall a. (f a -> Aff (Maybe a))
 evalDriver renderSpec disposed ref q =
   liftEffect (Ref.read disposed) >>=
@@ -58,11 +58,11 @@ evalDriver renderSpec disposed ref q =
       else Eval.evalQ (Render.render renderSpec true) ref q -- `isRoot` is true because `evalDriver` is used only on root container
 
 dispose
-  :: forall f o r h
-   . RenderSpec h r
+  :: forall f o r surface
+   . RenderSpec surface r
   -> Ref Boolean
   -> Ref LifecycleHandlers
-  -> DriverStateX h r f o
+  -> DriverStateX surface r f o
   -> Aff Unit
 dispose renderSpec disposed lchs dsx = Eval.handleLifecycle lchs do
   Ref.read disposed >>=
@@ -88,12 +88,12 @@ hydrateUI renderSpecWithHydration component i rootNode = runImplementation rende
     runComponentImplementation lchs eio = Hydrate.runComponentHydrate renderSpecWithHydration true rootNode lchs (liftEffect <<< eio.push) i component
 
 runUI
-  :: forall r f i o h
-   . RenderSpec h r
-  -> Component h f i o Aff
+  :: forall r f i o surface
+   . RenderSpec surface r
+  -> Component surface f i o Aff
   -> i
   -> Aff (HalogenIO f o Aff)
 runUI renderSpec component i = runImplementation renderSpec runComponentImplementation
   where
-    runComponentImplementation :: Ref.Ref LifecycleHandlers -> Event.EventIO o -> Effect (Ref.Ref (DriverStateX h r f o))
+    runComponentImplementation :: Ref.Ref LifecycleHandlers -> Event.EventIO o -> Effect (Ref.Ref (DriverStateX surface r f o))
     runComponentImplementation lchs eio = Render.runComponent renderSpec true lchs (liftEffect <<< eio.push) i component
