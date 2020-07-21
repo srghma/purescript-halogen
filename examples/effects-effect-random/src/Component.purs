@@ -13,7 +13,7 @@ data Action = Regenerate
 
 type State = Maybe Number
 
-component :: forall q i o m. MonadEffect m => H.Component q i o m
+component :: forall q i o m. MonadEffect m => H.Component HH.HTML q i o m
 component =
   H.mkComponent
     { initialState

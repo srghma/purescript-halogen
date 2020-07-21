@@ -27,8 +27,8 @@ handlePending ref = do
   for_ queue (Eval.handleAff <<< traverse_ fork <<< L.reverse)
 
 cleanupSubscriptionsAndForks
-  :: forall r s f act ps i o
-   . DriverState r s f act ps i o
+  :: forall r s f act ps i o surface
+   . DriverState surface r s f act ps i o
   -> Effect Unit
 cleanupSubscriptionsAndForks (DriverState ds) = do
   traverse_ sequence_ =<< Ref.read ds.subscriptions

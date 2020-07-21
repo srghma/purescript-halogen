@@ -16,7 +16,7 @@ import Web.DOM.Node (Node) as DOM
 -- | needed to render components.
 -- |
 -- | The type variables are as follows:
--- | - `h` is the type of value being rendered (`Halogen.HTML.Core.HTML`, for
+-- | - `surface` is the type of value being rendered (`Halogen.HTML.Core.HTML`, for
 -- |   example).
 -- | - `r` is the type for the "render state" for the driver. This is a value
 -- |   that is stored for each component, that allows the driver to persist
@@ -43,7 +43,7 @@ import Web.DOM.Node (Node) as DOM
 -- |   package. This return value would commonly be used to extract the rendered
 -- |   subtree for the child to graft it in place of the child slot. The
 -- |   existential package can be unwrapped with `Halogen.Aff.Driver.State.unRenderStateX`.
--- | - The `h` value to render, parameterised by the slot type for the
+-- | - The `surface` value to render, parameterised by the slot type for the
 -- |   component's children. This slot type is what the "child" function
 -- |   accepts.
 -- | - The previous render state for the component. If the component has not
@@ -70,12 +70,12 @@ import Web.DOM.Node (Node) as DOM
 -- |
 -- | The `dispose` function is called when the top level component is disposed of
 -- | via `HalogenIO`.
-type RenderSpec r =
+type RenderSpec surface r =
   { render
       :: forall s act ps o
        . (Input act -> Effect Unit)
-      -> (ComponentSlotBox ps Aff act -> Effect (RenderStateX r))
-      -> HC.HTML (ComponentSlot ps Aff act) act
+      -> (ComponentSlotBox surface ps Aff act -> Effect (RenderStateX r))
+      -> surface (ComponentSlot surface ps Aff act) act
       -> Boolean
       -> Maybe (r s act ps o)
       -> Effect (r s act ps o)
@@ -85,13 +85,13 @@ type RenderSpec r =
   }
 
 type RenderSpecWithHydration r =
-  { renderSpec :: RenderSpec r
+  { renderSpec :: RenderSpec HC.HTML r
   , hydrate
       :: forall s act ps o
        . (Input act -> Effect Unit)
-      -> (ComponentSlotBox ps Aff act -> Effect (RenderStateX r))
-      -> (ComponentSlotBox ps Aff act -> DOM.Node -> Effect (RenderStateX r))
-      -> HC.HTML (ComponentSlot ps Aff act) act
+      -> (ComponentSlotBox HC.HTML ps Aff act -> Effect (RenderStateX r))
+      -> (ComponentSlotBox HC.HTML ps Aff act -> DOM.Node -> Effect (RenderStateX r))
+      -> HC.HTML (ComponentSlot HC.HTML ps Aff act) act
       -> DOM.Node
       -> Effect (r s act ps o)
   }

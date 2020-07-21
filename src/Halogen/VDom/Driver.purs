@@ -38,13 +38,13 @@ import Web.HTML.HTMLElement as HTMLElement
 import Web.HTML.Window (document) as DOM
 
 type VHTML action slots =
-  V.VDom (Array (Prop (Input action))) (ComponentSlot slots Aff action)
+  V.VDom (Array (Prop (Input action))) (ComponentSlot HTML slots Aff action)
 
 type ChildRenderer action slots
-  = ComponentSlotBox slots Aff action -> Effect (RenderStateX RenderState)
+  = ComponentSlotBox HTML slots Aff action -> Effect (RenderStateX RenderState)
 
 type ChildRendererHydrate action slots
-  = ComponentSlotBox slots Aff action -> DOM.Node -> Effect (RenderStateX RenderState)
+  = ComponentSlotBox HTML slots Aff action -> DOM.Node -> Effect (RenderStateX RenderState)
 
 newtype RenderState state action slots output =
   RenderState
@@ -54,7 +54,7 @@ newtype RenderState state action slots output =
     }
 
 type HTMLThunk slots action =
-  Thunk (HTML (ComponentSlot slots Aff action)) action
+  Thunk (HTML (ComponentSlot HTML slots Aff action)) action
 
 type WidgetState slots action =
   Maybe (V.Step (HTMLThunk slots action) DOM.Node)
@@ -69,19 +69,19 @@ mkPatch
    . Fn.Fn2
        (Ref (ChildRenderer action slots))
        (V.Machine
-          (ComponentSlot slots Aff action)
+          (ComponentSlot HTML slots Aff action)
           DOM.Node)
        (EFn.EffectFn2
           (WidgetState slots action)
-          (ComponentSlot slots Aff action)
-          (V.Step (ComponentSlot slots Aff action) DOM.Node))
+          (ComponentSlot HTML slots Aff action)
+          (V.Step (ComponentSlot HTML slots Aff action) DOM.Node))
 mkPatch = Fn.mkFn2 \renderChildRef buildWidget ->
   let
     patch
       :: EFn.EffectFn2
         (WidgetState slots action)
-        (ComponentSlot slots Aff action)
-        (V.Step (ComponentSlot slots Aff action) DOM.Node)
+        (ComponentSlot HTML slots Aff action)
+        (V.Step (ComponentSlot HTML slots Aff action) DOM.Node)
     patch = EFn.mkEffectFn2 \widgetState slot -> do
       case widgetState of
         Just step -> case slot of
@@ -99,11 +99,11 @@ renderComponentSlot
    . EFn.EffectFn3
         (Ref (ChildRenderer action slots))
         (V.Machine
-          (ComponentSlot slots Aff action)
+          (ComponentSlot HTML slots Aff action)
           DOM.Node
         )
-        (ComponentSlotBox slots Aff action)
-        (V.Step (ComponentSlot slots Aff action) DOM.Node)
+        (ComponentSlotBox HTML slots Aff action)
+        (V.Step (ComponentSlot HTML slots Aff action) DOM.Node)
 renderComponentSlot = EFn.mkEffectFn3 \renderChildRef buildWidget componentSlotBox -> do
   (renderChild :: ChildRenderer action slots) <- Ref.read renderChildRef
   (rsx :: RenderStateX RenderState) <- renderChild componentSlotBox
@@ -117,11 +117,11 @@ renderComponentSlotHydrate
         (Ref (ChildRenderer action slots))
         (ChildRendererHydrate action slots)
         (V.Machine
-          (ComponentSlot slots Aff action)
+          (ComponentSlot HTML slots Aff action)
           DOM.Node
         )
-        (ComponentSlotBox slots Aff action)
-        (V.Step (ComponentSlot slots Aff action) DOM.Node)
+        (ComponentSlotBox HTML slots Aff action)
+        (V.Step (ComponentSlot HTML slots Aff action) DOM.Node)
 renderComponentSlotHydrate = EFn.mkEffectFn5 \node renderChildRef renderChildHydrate buildWidget componentSlotBox -> do
   (rsx :: RenderStateX RenderState) <- renderChildHydrate componentSlotBox node -- use hydration only initially here, but on next steps (patch - ordinary render)
   pure $ V.mkStep $ V.Step node Nothing (Fn.runFn2 mkPatch renderChildRef buildWidget) widgetDone
@@ -142,7 +142,7 @@ mkSpecWithHydration
   -> DOM.Document
   -> V.VDomSpecWithHydration
       (Array (VP.Prop (Input action)))
-      (ComponentSlot slots Aff action)
+      (ComponentSlot HTML slots Aff action)
 mkSpecWithHydration handler renderChildRef renderChildHydrate document =
   V.VDomSpecWithHydration { vdomSpec, hydrateWidget, hydrateAttributes }
   where
@@ -159,14 +159,14 @@ mkSpecWithHydration handler renderChildRef renderChildHydrate document =
   hydrateWidget
     :: V.VDomSpecWithHydration
           (Array (VP.Prop (Input action)))
-          (ComponentSlot slots Aff action)
+          (ComponentSlot HTML slots Aff action)
     -> DOM.Node
     -> V.Machine
-          (ComponentSlot slots Aff action)
+          (ComponentSlot HTML slots Aff action)
           DOM.Node
   hydrateWidget specWithHydration node = render
     where
-    render :: V.Machine (ComponentSlot slots Aff action) DOM.Node
+    render :: V.Machine (ComponentSlot HTML slots Aff action) DOM.Node
     render = EFn.mkEffectFn1 \slot -> do
       case slot of
         ComponentSlot cs ->
@@ -182,7 +182,7 @@ mkSpec
   -> DOM.Document
   -> V.VDomSpec
       (Array (VP.Prop (Input action)))
-      (ComponentSlot slots Aff action)
+      (ComponentSlot HTML slots Aff action)
 mkSpec handler renderChildRef document =
   V.VDomSpec { buildWidget, buildAttributes, document }
   where
@@ -195,13 +195,13 @@ mkSpec handler renderChildRef document =
   buildWidget
     :: V.VDomSpec
           (Array (VP.Prop (Input action)))
-          (ComponentSlot slots Aff action)
+          (ComponentSlot HTML slots Aff action)
     -> V.Machine
-          (ComponentSlot slots Aff action)
+          (ComponentSlot HTML slots Aff action)
           DOM.Node
   buildWidget spec = render
     where
-    render :: V.Machine (ComponentSlot slots Aff action) DOM.Node
+    render :: V.Machine (ComponentSlot HTML slots Aff action) DOM.Node
     render = EFn.mkEffectFn1 \slot -> do
       case slot of
         ComponentSlot cs ->
@@ -215,7 +215,7 @@ findDocument = liftEffect $ HTMLDocument.toDocument <$> (DOM.document =<< DOM.wi
 
 runUI
   :: forall query input output
-   . Component query input output Aff
+   . Component HTML query input output Aff
   -> input
   -> DOM.HTMLElement
   -> Aff (HalogenIO query output Aff)
@@ -225,7 +225,7 @@ runUI component i container = do
 
 hydrateUI
   :: forall query input output
-   . Component query input output Aff
+   . Component HTML query input output Aff
   -> input
   -> DOM.HTMLElement
   -> Aff (HalogenIO query output Aff)
@@ -248,7 +248,7 @@ renderSpecWithHydration document container =
      . (Input action -> Effect Unit)
     -> (ChildRenderer action slots)
     -> (ChildRendererHydrate action slots)
-    -> HTML (ComponentSlot slots Aff action) action
+    -> HTML (ComponentSlot HTML slots Aff action) action
     -> DOM.Node
     -> Effect (RenderState state action slots output)
   hydrate handler renderChild renderChildHydrate (HTML vdom) node = do
@@ -260,7 +260,7 @@ renderSpecWithHydration document container =
 renderSpec
   :: DOM.Document
   -> DOM.HTMLElement
-  -> AD.RenderSpec RenderState
+  -> AD.RenderSpec HTML RenderState
 renderSpec document container =
     { render
     , renderChild: identity
@@ -272,8 +272,8 @@ renderSpec document container =
   render
     :: forall state action slots output
      . (Input action -> Effect Unit)
-    -> (ComponentSlotBox slots Aff action -> Effect (RenderStateX RenderState))
-    -> HTML (ComponentSlot slots Aff action) action
+    -> (ComponentSlotBox HTML slots Aff action -> Effect (RenderStateX RenderState))
+    -> HTML (ComponentSlot HTML slots Aff action) action
     -> Boolean
     -> Maybe (RenderState state action slots output)
     -> Effect (RenderState state action slots output)
@@ -291,8 +291,8 @@ renderSpec document container =
 
 processNextRenderStateChange
   :: forall state action slots output
-   . (ComponentSlotBox slots Aff action -> Effect (RenderStateX RenderState))
-  -> HTML (ComponentSlot slots Aff action) action
+   . (ComponentSlotBox HTML slots Aff action -> Effect (RenderStateX RenderState))
+  -> HTML (ComponentSlot HTML slots Aff action) action
   -> RenderState state action slots output
   -> Effect (RenderState state action slots output)
 processNextRenderStateChange newRenderChild (HTML vdom) (RenderState { machine, node, renderChildRef }) = do
