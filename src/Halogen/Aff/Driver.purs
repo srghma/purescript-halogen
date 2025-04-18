@@ -116,173 +116,180 @@ runUI renderSpec component i = do
   disposed <- liftEffect $ Ref.new false
   Eval.handleLifecycle lchs do
     sio <- HS.create
-    dsx <- Ref.read =<< runComponent lchs (liftEffect <<< HS.notify sio.listener) i component
+    dsx <- Ref.read =<< runComponent renderSpec lchs (liftEffect <<< HS.notify sio.listener) i component
     dsx # unDriverStateX \st -> pure
-      { query: evalDriver disposed st.selfRef
+      { query: evalDriver renderSpec disposed st.selfRef
       , messages: sio.emitter
-      , dispose: dispose disposed lchs dsx
+      , dispose: dispose renderSpec disposed lchs dsx
       }
-  where
-  evalDriver
-    :: forall s f' act ps i' o'
-     . Ref Boolean
-    -> Ref (DriverState r s f' act ps i' o')
-    -> (forall a. f' a -> Aff (Maybe a))
-  evalDriver disposed ref q =
-    liftEffect (Ref.read disposed) >>=
-      if _ then pure Nothing
-      else Eval.evalQ render ref q
 
-  runComponent
-    :: forall f' i' o'
-     . Ref LifecycleHandlers
-    -> (o' -> Aff Unit)
-    -> i'
-    -> Component f' i' o' Aff
-    -> Effect (Ref (DriverStateX r f' o'))
-  runComponent lchs handler j = unComponent \c -> do
-    lchs' <- newLifecycleHandlers
-    var <- initDriverState c j handler lchs'
-    pre <- Ref.read lchs
-    Ref.write { initializers: L.Nil, finalizers: pre.finalizers } lchs
-    unDriverStateX (render lchs <<< _.selfRef) =<< Ref.read var
-    squashChildInitializers lchs pre.initializers =<< Ref.read var
-    pure var
+evalDriver
+  :: forall r s f' act ps i' o'
+   . RenderSpec r
+  -> Ref Boolean
+  -> Ref (DriverState r s f' act ps i' o')
+  -> (forall a. f' a -> Aff (Maybe a))
+evalDriver renderSpec disposed ref q =
+  liftEffect (Ref.read disposed) >>=
+    if _ then pure Nothing
+    else Eval.evalQ (render renderSpec) ref q
 
-  render
-    :: forall s f' act ps i' o'
-     . Ref LifecycleHandlers
-    -> Ref (DriverState r s f' act ps i' o')
-    -> Effect Unit
-  render lchs var = Ref.read var >>= \(DriverState ds) -> do
-    shouldProcessHandlers <- isNothing <$> Ref.read ds.pendingHandlers
-    when shouldProcessHandlers $ Ref.write (Just L.Nil) ds.pendingHandlers
-    Ref.write Slot.empty ds.childrenOut
-    Ref.write ds.children ds.childrenIn
+runComponent
+  :: forall r f' i' o'
+   . RenderSpec r
+  -> Ref LifecycleHandlers
+  -> (o' -> Aff Unit)
+  -> i'
+  -> Component f' i' o' Aff
+  -> Effect (Ref (DriverStateX r f' o'))
+runComponent renderSpec lchs handler j = unComponent \c -> do
+  lchs' <- newLifecycleHandlers
+  var <- initDriverState c j handler lchs'
+  pre <- Ref.read lchs
+  Ref.write { initializers: L.Nil, finalizers: pre.finalizers } lchs
+  unDriverStateX (render renderSpec lchs <<< _.selfRef) =<< Ref.read var
+  squashChildInitializers renderSpec lchs pre.initializers =<< Ref.read var
+  pure var
 
-    let
-      -- The following 3 defs are working around a capture bug, see #586
-      pendingHandlers = identity ds.pendingHandlers
-      pendingQueries = identity ds.pendingQueries
-      selfRef = identity ds.selfRef
+render
+  :: forall r s f' act ps i' o'
+   . RenderSpec r
+  -> Ref LifecycleHandlers
+  -> Ref (DriverState r s f' act ps i' o')
+  -> Effect Unit
+render renderSpec lchs var = Ref.read var >>= \(DriverState ds) -> do
+  shouldProcessHandlers <- isNothing <$> Ref.read ds.pendingHandlers
+  when shouldProcessHandlers $ Ref.write (Just L.Nil) ds.pendingHandlers
+  Ref.write Slot.empty ds.childrenOut
+  Ref.write ds.children ds.childrenIn
 
-      handler :: Input act -> Aff Unit
-      handler = Eval.queueOrRun pendingHandlers <<< void <<< Eval.evalF render selfRef
+  let
+    -- The following 3 defs are working around a capture bug, see #586
+    pendingHandlers = identity ds.pendingHandlers
+    pendingQueries = identity ds.pendingQueries
+    selfRef = identity ds.selfRef
 
-      childHandler :: act -> Aff Unit
-      childHandler = Eval.queueOrRun pendingQueries <<< handler <<< Input.Action
+    handler :: Input act -> Aff Unit
+    handler = Eval.queueOrRun pendingHandlers <<< void <<< Eval.evalF (render renderSpec) selfRef
 
-    rendering <-
-      renderSpec.render
-        (Eval.handleAff <<< handler)
-        (renderChild lchs childHandler ds.childrenIn ds.childrenOut)
-        (ds.component.render ds.state)
-        ds.rendering
+    childHandler :: act -> Aff Unit
+    childHandler = Eval.queueOrRun pendingQueries <<< handler <<< Input.Action
 
-    children <- Ref.read ds.childrenOut
-    childrenIn <- Ref.read ds.childrenIn
+  rendering <-
+    renderSpec.render
+      (Eval.handleAff <<< handler)
+      (renderChild renderSpec lchs childHandler ds.childrenIn ds.childrenOut)
+      (ds.component.render ds.state)
+      ds.rendering
 
-    Slot.foreachSlot childrenIn \(DriverStateRef childVar) -> do
-      childDS <- Ref.read childVar
-      renderStateX_ renderSpec.removeChild childDS
-      finalize lchs childDS
+  children <- Ref.read ds.childrenOut
+  childrenIn <- Ref.read ds.childrenIn
 
-    flip Ref.modify_ ds.selfRef $ mapDriverState \ds' ->
-      ds' { rendering = Just rendering, children = children }
+  Slot.foreachSlot childrenIn \(DriverStateRef childVar) -> do
+    childDS <- Ref.read childVar
+    renderStateX_ renderSpec.removeChild childDS
+    finalize renderSpec lchs childDS
 
-    when shouldProcessHandlers do
-      flip tailRecM unit \_ -> do
-        handlers <- Ref.read pendingHandlers
-        Ref.write (Just L.Nil) pendingHandlers
-        traverse_ (Eval.handleAff <<< traverse_ fork <<< L.reverse) handlers
-        mmore <- Ref.read pendingHandlers
-        if maybe false L.null mmore then Ref.write Nothing pendingHandlers $> Done unit
-        else pure $ Loop unit
+  flip Ref.modify_ ds.selfRef $ mapDriverState \ds' ->
+    ds' { rendering = Just rendering, children = children }
 
-  renderChild
-    :: forall ps act
-     . Ref LifecycleHandlers
-    -> (act -> Aff Unit)
-    -> Ref (Slot.SlotStorage ps (DriverStateRef r))
-    -> Ref (Slot.SlotStorage ps (DriverStateRef r))
-    -> ComponentSlotBox ps Aff act
-    -> Effect (RenderStateX r)
-  renderChild lchs handler childrenInRef childrenOutRef =
-    unComponentSlot \slot -> do
-      childrenIn <- slot.pop <$> Ref.read childrenInRef
-      var <- case childrenIn of
-        Just (Tuple (DriverStateRef existing) childrenIn') -> do
-          Ref.write childrenIn' childrenInRef
-          dsx <- Ref.read existing
-          dsx # unDriverStateX \st -> do
-            flip Ref.write st.handlerRef $ maybe (pure unit) handler <<< slot.output
-            Eval.handleAff $ Eval.evalM render st.selfRef (st.component.eval (HQ.Receive slot.input unit))
-          pure existing
-        Nothing ->
-          runComponent lchs (maybe (pure unit) handler <<< slot.output) slot.input slot.component
-      isDuplicate <- isJust <<< slot.get <$> Ref.read childrenOutRef
-      when isDuplicate
-        $ warn "Halogen: Duplicate slot address was detected during rendering, unexpected results may occur"
-      Ref.modify_ (slot.set $ DriverStateRef var) childrenOutRef
-      Ref.read var >>= renderStateX case _ of
-        Nothing -> throw "Halogen internal error: child was not initialized in renderChild"
-        Just r -> pure (renderSpec.renderChild r)
+  when shouldProcessHandlers do
+    flip tailRecM unit \_ -> do
+      handlers <- Ref.read pendingHandlers
+      Ref.write (Just L.Nil) pendingHandlers
+      traverse_ (Eval.handleAff <<< traverse_ fork <<< L.reverse) handlers
+      mmore <- Ref.read pendingHandlers
+      if maybe false L.null mmore then Ref.write Nothing pendingHandlers $> Done unit
+      else pure $ Loop unit
 
-  squashChildInitializers
-    :: forall f' o'
-     . Ref LifecycleHandlers
-    -> L.List (Aff Unit)
-    -> DriverStateX r f' o'
-    -> Effect Unit
-  squashChildInitializers lchs preInits =
-    unDriverStateX \st -> do
-      let parentInitializer = Eval.evalM render st.selfRef (st.component.eval (HQ.Initialize unit))
-      lchs # Ref.modify_ \handlers ->
-        { initializers:
-            ( do
-                parSequence_ (L.reverse handlers.initializers)
-                parentInitializer
-                liftEffect do
-                  handlePending st.pendingQueries
-                  handlePending st.pendingOuts
-            ) : preInits
-        , finalizers: handlers.finalizers
-        }
+renderChild
+  :: forall r ps act
+   . RenderSpec r
+  -> Ref LifecycleHandlers
+  -> (act -> Aff Unit)
+  -> Ref (Slot.SlotStorage ps (DriverStateRef r))
+  -> Ref (Slot.SlotStorage ps (DriverStateRef r))
+  -> ComponentSlotBox ps Aff act
+  -> Effect (RenderStateX r)
+renderChild renderSpec lchs handler childrenInRef childrenOutRef =
+  unComponentSlot \slot -> do
+    childrenIn <- slot.pop <$> Ref.read childrenInRef
+    var <- case childrenIn of
+      Just (Tuple (DriverStateRef existing) childrenIn') -> do
+        Ref.write childrenIn' childrenInRef
+        dsx <- Ref.read existing
+        dsx # unDriverStateX \st -> do
+          flip Ref.write st.handlerRef $ maybe (pure unit) handler <<< slot.output
+          Eval.handleAff $ Eval.evalM (render renderSpec) st.selfRef (st.component.eval (HQ.Receive slot.input unit))
+        pure existing
+      Nothing ->
+        runComponent renderSpec lchs (maybe (pure unit) handler <<< slot.output) slot.input slot.component
+    isDuplicate <- isJust <<< slot.get <$> Ref.read childrenOutRef
+    when isDuplicate
+      $ warn "Halogen: Duplicate slot address was detected during rendering, unexpected results may occur"
+    Ref.modify_ (slot.set $ DriverStateRef var) childrenOutRef
+    Ref.read var >>= renderStateX case _ of
+      Nothing -> throw "Halogen internal error: child was not initialized in renderChild"
+      Just r -> pure (renderSpec.renderChild r)
 
-  finalize
-    :: forall f' o'
-     . Ref LifecycleHandlers
-    -> DriverStateX r f' o'
-    -> Effect Unit
-  finalize lchs = do
-    unDriverStateX \{ selfRef } -> do
-      (DriverState st) <- liftEffect $ Ref.read selfRef
-      cleanupSubscriptionsAndForks (DriverState st)
-      let f = Eval.evalM render st.selfRef (st.component.eval (HQ.Finalize unit))
-      lchs # Ref.modify_ \handlers ->
-        { initializers: handlers.initializers
-        , finalizers: f : handlers.finalizers
-        }
-      Slot.foreachSlot st.children \(DriverStateRef ref) -> do
-        dsx <- Ref.read ref
-        finalize lchs dsx
+squashChildInitializers
+  :: forall r f' o'
+   . RenderSpec r
+  -> Ref LifecycleHandlers
+  -> L.List (Aff Unit)
+  -> DriverStateX r f' o'
+  -> Effect Unit
+squashChildInitializers renderSpec lchs preInits =
+  unDriverStateX \st -> do
+    let parentInitializer = Eval.evalM (render renderSpec) st.selfRef (st.component.eval (HQ.Initialize unit))
+    lchs # Ref.modify_ \handlers ->
+      { initializers:
+          ( do
+              parSequence_ (L.reverse handlers.initializers)
+              parentInitializer
+              liftEffect do
+                handlePending st.pendingQueries
+                handlePending st.pendingOuts
+          ) : preInits
+      , finalizers: handlers.finalizers
+      }
 
-  dispose
-    :: forall f' o'
-     . Ref Boolean
-    -> Ref LifecycleHandlers
-    -> DriverStateX r f' o'
-    -> Aff Unit
-  dispose disposed lchs dsx = Eval.handleLifecycle lchs do
-    Ref.read disposed >>=
-      if _ then
-        pure unit
-      else do
-        Ref.write true disposed
-        finalize lchs dsx
-        dsx # unDriverStateX \{ selfRef } -> do
-          (DriverState ds) <- liftEffect $ Ref.read selfRef
-          for_ ds.rendering renderSpec.dispose
+finalize
+  :: forall r f' o'
+   . RenderSpec r
+  -> Ref LifecycleHandlers
+  -> DriverStateX r f' o'
+  -> Effect Unit
+finalize renderSpec lchs = do
+  unDriverStateX \{ selfRef } -> do
+    (DriverState st) <- liftEffect $ Ref.read selfRef
+    cleanupSubscriptionsAndForks (DriverState st)
+    let f = Eval.evalM (render renderSpec) st.selfRef (st.component.eval (HQ.Finalize unit))
+    lchs # Ref.modify_ \handlers ->
+      { initializers: handlers.initializers
+      , finalizers: f : handlers.finalizers
+      }
+    Slot.foreachSlot st.children \(DriverStateRef ref) -> do
+      dsx <- Ref.read ref
+      finalize renderSpec lchs dsx
+
+dispose
+  :: forall r f' o'
+   . RenderSpec r
+  -> Ref Boolean
+  -> Ref LifecycleHandlers
+  -> DriverStateX r f' o'
+  -> Aff Unit
+dispose renderSpec disposed lchs dsx = Eval.handleLifecycle lchs do
+  Ref.read disposed >>=
+    if _ then
+      pure unit
+    else do
+      Ref.write true disposed
+      finalize renderSpec lchs dsx
+      dsx # unDriverStateX \{ selfRef } -> do
+        (DriverState ds) <- liftEffect $ Ref.read selfRef
+        for_ ds.rendering renderSpec.dispose
 
 newLifecycleHandlers :: Effect (Ref LifecycleHandlers)
 newLifecycleHandlers = Ref.new { initializers: L.Nil, finalizers: L.Nil }
