@@ -22,7 +22,8 @@
     "example-interpret": "cd examples/interpret && spago bundle --module Example.Interpret.Main --outfile dist/example.js",
     "example-keyboard-input": "cd examples/keyboard-input && spago bundle --module Example.KeyboardInput.Main --outfile dist/example.js",
     "example-lifecycle": "cd examples/lifecycle && spago bundle --module Example.Lifecycle.Main --outfile dist/example.js",
-    "example-memoized-lazy": "cd examples/memoized-lazy && spago bundle --module Example.MemoizedLazy.Main --outfile dist/example.js"
+    "example-memoized-lazy": "cd examples/memoized-lazy && spago bundle --module Example.MemoizedLazy.Main --outfile dist/example.js",
+    "example-hydration": "cd examples/hydration && npm run all"
   },
   "devDependencies": {
     "ace-builds": "^1.40.0",

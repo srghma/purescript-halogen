@@ -37,6 +37,7 @@
             "halogen",
             "halogen-subscriptions",
             "halogen-vdom",
+            "halogen-vdom-string-renderer",
             "identity",
             "integers",
             "invariant",
@@ -622,6 +623,14 @@
     "extra_packages": {
       "halogen": {
         "path": "../.."
+      },
+      "halogen-vdom": {
+        "git": "https://github.com/srghma/purescript-halogen-vdom.git",
+        "ref": "pure/hydration"
+      },
+      "halogen-vdom-string-renderer": {
+        "git": "https://github.com/srghma/purescript-halogen-vdom-string-renderer.git",
+        "ref": "master"
       }
     }
   },
@@ -996,6 +1005,7 @@
         "functions",
         "halogen-subscriptions",
         "halogen-vdom",
+        "halogen-vdom-string-renderer",
         "lazy",
         "lists",
         "maybe",
@@ -1038,12 +1048,14 @@
       ]
     },
     "halogen-vdom": {
-      "type": "registry",
-      "version": "8.0.0",
-      "integrity": "sha256-5UMDekaYNSM3jtpfWoWTbmZ38rIcnguzGRW3z+IQgV4=",
+      "type": "git",
+      "url": "https://github.com/srghma/purescript-halogen-vdom.git",
+      "rev": "afd5ce6b7ea14e66d19c4f57e13d76e514273c5e",
       "dependencies": [
         "bifunctors",
+        "console",
         "effect",
+        "exists",
         "foreign",
         "foreign-object",
         "maybe",
@@ -1052,6 +1064,23 @@
         "tuples",
         "unsafe-coerce",
         "web-html"
+      ]
+    },
+    "halogen-vdom-string-renderer": {
+      "type": "git",
+      "url": "https://github.com/srghma/purescript-halogen-vdom-string-renderer.git",
+      "rev": "91bddf5c008d8aab5542d8633c59d7f0a587dc50",
+      "dependencies": [
+        "arrays",
+        "foreign",
+        "halogen-vdom",
+        "maybe",
+        "numbers",
+        "ordered-collections",
+        "prelude",
+        "strings",
+        "tuples",
+        "unsafe-coerce"
       ]
     },
     "identity": {

@@ -48,6 +48,7 @@ package:
     - web-pointerevents: ">=2.0.0 <3.0.0"
     - web-touchevents: ">=4.0.0 <5.0.0"
     - web-uievents: ">=5.0.0 <6.0.0"
+    - halogen-vdom-string-renderer
   test:
     main: Test.Main
     dependencies:
@@ -55,6 +56,16 @@ package:
       - effect
       - assert
 workspace:
-  extraPackages: {}
+  extraPackages:
+    halogen-vdom-string-renderer:
+      # path: /home/srghma/projects/purescript-halogen-vdom-string-renderer
+      # git: https://github.com/purescript-halogen/purescript-halogen-vdom-string-renderer.git
+      git: https://github.com/srghma/purescript-halogen-vdom-string-renderer.git
+      ref: master
+    halogen-vdom:
+      # path: /home/srghma/projects/purescript-halogen-vdom
+      # git: https://github.com/purescript-halogen/purescript-halogen-vdom.git
+      git: https://github.com/srghma/purescript-halogen-vdom.git
+      ref: pure/hydration
   packageSet:
     registry: 64.1.1
